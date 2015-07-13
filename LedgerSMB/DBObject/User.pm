@@ -6,9 +6,12 @@ LedgerSMB::DBObject::User - LedgerSMB User DB Objects
 
 package LedgerSMB::DBObject::User;
 
-use base qw/LedgerSMB::DBObject/;
+use base qw/LedgerSMB::PGOld/;
 use Data::Dumper;
 use strict;
+use Log::Log4perl;
+
+use Try::Tiny;
 
 =head2 NOTES
 
@@ -53,8 +56,8 @@ sub country_codes {
 
 sub save_preferences {
     my ($self) = @_;
-    $self->exec_method(funcname => 'user__save_preferences');
-    $self->get_user_info;
+    $self->call_dbmethod(funcname => 'user__save_preferences');
+    $self->get;
 }
 
 sub change_my_password {
@@ -82,7 +85,7 @@ sub change_my_password {
         die;
     }
     $self->{password} = $self->{new_password};
-    $self->exec_method(funcname => 'user__change_password');
+    $self->call_dbmethod(funcname => 'user__change_password');
     $self->{dbh}->commit; # This is needed since it is not the normal DBH!
     $self->{dbh}->disconnect;
     $self->{dbh} = $old_dbh;
@@ -96,9 +99,11 @@ sub get_option_data {
     for my $opt (qw(mm-dd-yyyy mm/dd/yyyy dd-mm-yyyy dd/mm/yyyy dd.mm.yyyy yyyy-mm-dd)){
         push @{$self->{dateformats}}, {format => $opt};
     }
+    no warnings 'qw';
     for my $opt (qw(1,000.00 1000.00 1.000,00 1000,00 1'000.00)){
         push @{$self->{numberformats}}, {format => $opt};
     }
+    use warnings;
 
     my %country_codes = country_codes();
 
@@ -125,7 +130,7 @@ sub get_option_data {
             push @{$self->{printers}}, {printer => $item};
         }
     }
-    my ($pw_expiration) = $self->exec_method(
+    my ($pw_expiration) = $self->call_dbmethod(
             funcname => 'user__check_my_expiration');
     $self->{password_expires} = $pw_expiration->{user__check_my_expiration};
 }
@@ -137,23 +142,20 @@ sub save {
     my $self = shift @_;
     my $user = $self->get();
     
-    
-    # doesn't check for the password - that's done in the sproc. --Aurynn
-    # Note here that we pass continue_on_error to the sproc and handle
-    # any exceptions ourselves --CT
-    my ($ref) = $self->exec_method(funcname=>'admin__save_user',
-                          continue_on_error=> 1);
+    my $errcode;
+    my ($ref) = try { $self->call_dbmethod(funcname=>'admin__save_user') }
+                catch {
+                   if ($_ =~ /No password/){
+                      die LedgerSMB::App_State::Locale->text(
+                             'Password required'
+                      );
+                   } elsif ($_ =~/Duplicate user/){
+                      $self->{dbh}->rollback;
+                      $errcode = 8;
+                   }
+                };
+    return $errcode if $errcode;
 
-    # Handling exceptions here
-    if (!$ref) { # Unsuccessful
-        if ($@ =~ /No password/){
-              $self->error($self->{_locale}->text('Password required'));
-        } elsif ($@ =~/Duplicate user/){
-              $self->{dbh}->rollback;
-              return 8;
-        }
-
-    } 
     ($self->{id}) = values %$ref;
     if (!$self->{id}) {
         
@@ -172,39 +174,30 @@ sub get {
     if (!defined $self->{user_id}){
        return;
     }
-    my ($user) = $self->exec_method(
-        funcname=>'admin__get_user',
-        );
+    my ($user) = $self->call_dbmethod(funcname=>'admin__get_user');
     $self->{user} = $user;
-    my ($prefs) = $self->exec_method(
-        funcname=>'user__get_preferences',
-        );
+    my ($prefs) = $self->call_dbmethod(funcname=>'user__get_preferences');
     $self->{prefs} = $prefs;
-#    $self->{person} = @{ $self->exec_method(
-#        funcname=>'admin__user_preferences',
-#        args=>[$self->{user}->{entity_id}]
-#        )
-#    }[0];
-    my ($emp) = $self->exec_method(
+    my ($emp) = $self->call_procedure(
         funcname=>'employee__get',
         args=>[$self->{user}->{entity_id}]
         );
     $self->{employee} = $emp;
-    my ($ent) = $self->exec_method( 
+    my ($ent) = $self->call_procedure( 
         funcname=>'entity__get',
         args=>[ $self->{user}->{entity_id} ] 
         );
     $self->{entity} = $ent;
-    my @roles = $self->exec_method(
+    my @roles = $self->call_dbmethod(
         funcname=>'admin__get_roles_for_user',
     );
     # Now, location and stuff.
-    my @loc = $self->exec_method(
+    my @loc = $self->call_procedure(
         funcname=>'person__list_locations',
         args=>[ $self->{user}->{entity_id} ]
     );
     $self->{locations} = \@loc;
-    my @contacts = $self->exec_method(
+    my @contacts = $self->call_procedure(
         funcname=>"person__list_contacts",
         args=>[$self->{user}->{entity_id} ]
     );
@@ -220,12 +213,6 @@ sub get {
     
     $self->{entity_id} = $self->{entity}->{id};
     
-    #$user->{user} = $u->get($id);
-    #$user->{pref} = $u->preferences($id);
-    #$user->{employee} = $u->employee($user->{user}->{entity_id});
-    #$user->{person} = $u->person($user->{user}->{entity_id});
-    #$user->{entity} = $u->entity($id);
-    #$user->{roles} = $u->roles($id);
     return $user;
 }
 
@@ -233,8 +220,8 @@ sub remove {
     
     my $self = shift;
     
-    my $code = $self->exec_method(funcname=>"admin__delete_user", args=>[$self->{id}, $self->{username}]);
-    $self->{id} = undef; # never existed..
+    my $code = $self->call_procedure(funcname=>"admin__delete_user", args=>[$self->{id}, $self->{username}]);
+    $self->{id} = undef; 
     
     return $code->[0];
 }
@@ -243,7 +230,7 @@ sub save_prefs {
     
     my $self = shift @_; 
     
-    my $pref_id = $self->exec_method(funcname=>"admin__save_preferences", 
+    my $pref_id = $self->call_procedure(funcname=>"admin__save_preferences", 
         args=>[
             'language',
             'stylesheet',
@@ -258,7 +245,7 @@ sub get_all_users {
     
     my $self = shift @_;
     
-    my @ret = $self->exec_method( funcname=>"user__get_all_users" );
+    my @ret = $self->call_dbmethod( funcname=>"user__get_all_users" );
     $self->{users} = \@ret;
 }
 
@@ -277,11 +264,12 @@ sub save_contact {
     my $class = shift @_;
     my $contact = shift @_;
     my @ret;
-    
-    print STDERR Dumper($self->{entity}->{id});
+    my $logger = Log::Log4perl->get_logger("LedgerSMB");
+
+    $logger->debug( sub { Dumper($self->{entity}->{id}) });
     if ($id) {
-        print STDERR "Found ID..";
-        @ret = $self->exec_method(funcname=>"person__save_contact", 
+        $logger->debug("Found ID..");
+        @ret = $self->call_procedure(funcname=>"person__save_contact", 
             args=>[
                 $self->{entity}->{id},
                 $self->{contacts}->[$id]->{contact_class},
@@ -291,11 +279,11 @@ sub save_contact {
         );
     } 
     else{
-        print STDERR "Did not find an ID, attempting to save a new contact..\n";
-        print STDERR ($class."\n");
-        print STDERR ($contact."\n");
-        print STDERR ($self->{entity_id}."\n");
-        @ret = $self->exec_method(funcname=>"person__save_contact",
+        $logger->debug("Did not find an ID, attempting to save a new contact..\n");
+        $logger->debug($class."\n");
+        $logger->debug($contact."\n");
+        $logger->debug($self->{entity_id}."\n");
+        @ret = $self->call_procedure(funcname=>"person__save_contact",
             args=>[
                 $self->{entity_id},
                 $class,
@@ -304,23 +292,12 @@ sub save_contact {
             ]
         );
     }
-    print STDERR Dumper(\@ret);
+    $logger->debug(sub { return Dumper(\@ret) });
     if ($ret[0]->{person__save_contact} != 1){
         die "Couldn't save contact...";
     }
     return 1;
 }
 
-sub delete_contact {
-    
-    my $self = shift @_;
-    my $id = shift @_;
-    
-    # Okay
-    # ID doesn't actually conform to any database entry
-    # We're basically cheating outrageously here.
-    
-    
-}
 1;
 

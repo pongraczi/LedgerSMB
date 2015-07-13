@@ -24,11 +24,12 @@ ELSE;
        CLS.value = CLS.id;
    END;
    batch_classes.unshift({});
+   SHOW_APPROVED=1;
 END;
 
  ?>
 <body class="<?lsmb dojo_theme ?>">
-<form action="<?lsmb script ?>" method="get">
+<form action="<?lsmb request.script ?>" method="get">
 <div class="listtop" id="title_div"><?lsmb text('Search Unapproved Transactions') ?></div>
 <div class="tabular col-1">
 <div class="input" id="batch_class_div">
@@ -53,6 +54,25 @@ Commenting this section out.  Does not seem to be used by API. -CT
 		name = "created_by_eid"
 		default_values = [created_by]
 	} ?></div> -->
+<?lsmb IF SHOW_APPROVED ?>
+<div class="input" id="approved_div">
+  <?lsmb INCLUDE input element_data = {
+          name="approved"
+          id="approved-1"
+          value="1"
+          label= text("Approved")
+          type="radio"
+   };
+   INCLUDE input element_data = {
+          name="approved"
+          id="approved-0"
+          value="0"
+          label= text("Unpproved")
+          type="radio"
+          checked="CHECKED"
+   }; ?>
+</div>
+<?lsmb END ?>
 <div class="input" id="reference_div">
 	<?lsmb INCLUDE input element_data = {
 		label = text('Reference') #'

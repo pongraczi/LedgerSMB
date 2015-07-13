@@ -1,6 +1,222 @@
-Changelog for 1.4 Series
+Changelog for 1.5 Series
 Forthcoming
 
+Code Cleanup:
+* LedgerSMB now relies on plack.  Previous stub scripts removed (ChrisT)
+
+API Enhancements:
+* Moved a great deal of code into PGObject framework on CPAN (Chris T)
+
+Changelog for 1.4 Series
+Released 2014-09-15
+
+Changelog for 1.4.13
+* Account edit group can checkboxes and mark accounts obsolete (Chris T)
+* Fixed time cards failing to save (GitHub bug 636) (Erik H)
+* List COGS accounts under 'Default COGS' (instead of expense) (Erik H)
+* Fix preprocessing Roles.sql was required in 1.3 (obsolete in 1.4) (Erik H)
+* Fix entry, selection and listing of GIFI account codes (Erik H)
+* Fix entity "Accounts" 'Save as' button (Erik H)
+* Fix 'Business Type' not showing up in Contact Account tab (Erik H)
+* Fix balance sheet CSV missing 'description' column content (Erik H)
+* Fix can't delete draft transactions with reporting units (SF 1391) (Erik H)
+* GIFI PNL reports are back.  (Chris T)
+
+Erik H is Erik Huelsmann
+Chris T is Chris Travers
+
+Changelog for 1.4.12
+* Updated German translation by Adrian v. Meibom <meibomberlin@googlemail.com>
+* Fixed printing of purchase order due to SQL error (bug 1359) (Erik H)
+* Don't show button for dis-allowed action in GL entry (bug 1355) (Erik H)
+* Admin can't reset user's password due to SQL error (bug 1333) (Erik H)
+* Fix dependency listing (include JSON) (bug 1347) (Erik H)
+* Make setup.pl generate fewer warnings in the error logs (Erik H)
+* Fix 'Save as' in contact account clobbering existing one (bug 1364) (Erik H)
+* Fixed empty response causing some problems. (Chris T)
+* Detect account heading graph loops and throw errors (Chris T)
+* Fixed errors about missing employee.pm (Erik H)
+* Add PNL and Balance sheet CSV export (Erik H)
+
+Chris T is Chris Travers
+Erik H is Erik Huelsmann
+Changelog for 1.4.11
+* Fixed account dropdowns on default screen (Nick P)
+* Fixed broken comparison with oldvendor (Nick P)
+* Fixed workflow for saving reconciliation reports (Nick P)
+* Fixed HTML errors in payment details (Nick P)
+* Making LaTeX optional on starman (Chris T)
+* Fixing issues where colon is in password (Chris T)
+* Fixed missing separation of duties on GL (Chris T)
+* Fixed GL new button preserving first line (Chris T)
+* Fixed AR/AP transactions not saving when using dojo widget (Chris T)
+* Fixed 'New' button on GL entry screen leaving an uncleared line (Erik H)
+* Fixed Account/Heading entry screen selecting tab on 'Update' (Erik H)
+* Fixed Heading 'Save' action complaining about conflicting data (Erik H)
+* Multiple fixes showing and saving account/heading headings (Erik H)
+* Add 'Delete' option for headings not linked to accounts/headings (Erik H)
+* Fixed encoding issue for special characters in password change (Erik H)
+* Fixing Malaysian language issues (DB and preferences, bug #1358) (Pongracz I)
+
+Chris T is Chris Travers
+Nick P is Nick Prater
+Erik H is Erik Huelsmann
+Pongracz I is Istvan Pongracz
+Changelog for 1.4.10
+* Note:  Corrected version numbers in 1.4.10.1, 1.4.10 had 1.4.9 as version
+* Malay translation added (Kaiser F, and others)
+* Fixed 1292, some template editing scripts linked to wrong mod (Chris T)
+* Fixed 1290, payment/receipt screen options never show (Chris T)
+* Fixed 1291, cannot change customer/vendor on orders/quotes (Chris T)
+* Cleaned up logs a little (Chris T)
+* Fixed 1294, cannot change parts description or price on inv. (Chris T)
+* Fixed 1298, upgrade does not create ar.setting_sequence (Chris T)
+* Fixed 1304.1, removed check printing from invoices (Chris T)
+* Fixed join issue for GL drafts showing wrong amt (Chris T)
+* Fixed 1304.2, pay to name not used in single payment (Chris T)
+* Fixed 1314, download link files attached to ECA and entity broken (Erik H)
+* Fixed column names in ECA/entity linked files tables (John L)
+* Fixed headers indistinguishable from accounts in CoA for some CSS (Erik H)
+* Fixed 404 on invoice link from AR/AP aging reports details view (Erik H)
+* Fixed html in fixed assets screens (Erik H)
+
+Chris T is Chris Travers
+Kaiser F is Kaiser Farrel
+Erik H is Erik Huelsmann
+John L is John Locke
+
+Changelog for 1.4.9
+* Removed optional dependency on LaTeX from starman preload (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.4.8
+* Fixed end-date not a date widget on employee div (Chris T)
+* Fixed errors saving person as employee on contacts screen (Chris T)
+* Added min empty lines for orders, invoices, and gl (Chris T, 1277)
+* Fixed 1280, credit/debit invoices flipping signs (Chris T)
+* Fixed 1279, gaps possible if drafts are deleted (Chris T)
+* Fixed 1287, perl errors on missing inputs on setup.pl (Chris T)
+* Fixed 1285, unable to enter more than 1 top-level rep. unit (Chris T)
+* Fixed 1283, dash in header of amounts col in PNL (Chris T)
+* Fixed 1284, pdf pnl does not work over https or nonstandard ports (Chris T)
+* Fixed 1282, business units not passed to trial balance (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.4.7
+* Fixed 1231, lack of validation on forms leads to Perl errors (Chris T)
+* Fixed 1264, account numbers out of place on PNL (Chris T)
+* Fixed 1268, name not clickable on customer/vendor searches (Chris T)
+* Fixed 1274, error on posting payment reversals w. dd/mm/yyy dates (Chris T)
+* Fixed 1227, 1252, added batch printing via batches (Chris T)
+* Fixed bug 1275, post error due to trying to double encode arry (Chris T)
+* Fixing position of returns checkbox on account screen (Chris T)
+* Fixed bug 1278, multi-language templates not stored in db (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.4.6
+* Fixed bug 1259, id from new_shipto overwrites form-id (Pongracz I)
+* Fixed related bug to 1259 on invoices (Chris T)
+* Updated Dutch translation (Frans S and Erik H)
+* New returns-specific logic (see release notes) (Chris T)
+* Fixed bug 1262, cannot post overpayment with formatted nums (Chris T)
+* Fixed bug 1263, error when control_code not filled in (chris T)
+* Fixed update button not showing after save (Chris T)
+* Fixed bug 1260, Multiple vendor skus breaks display of invoice (Chris T)
+* Removed buggy batch printing interface (Chris T)
+* Added search for approved batches (Chris T)
+* Fixed PGNumber error when posting gl entry (Chris T)
+* Fixed bug 1273, some invoices cannot be opened (John L)
+
+Pongracz I is Pongracz Istvan
+Chris T is Chris Travers
+Frans S is Frans van der Star
+Erik H is Erik Huelsmann
+John L is John Locke
+
+Changelog for 1.4.5
+* Fixed bug 1245, print and email buttons lost after email invoice (Chris T)
+* Fixed bug 1246, entity-level addresses do not show on invoice (Chris T)
+* Fixed bug 1244, manually entered tax crashes invoice on edit (Chris T)
+* Fixed bug 1253, report pdfs redirect to port 80 (Chris T)
+* Fixed internal server error on single payment interface (Chris T)
+* Adding tax_id hidden field to order and offer forms to be able to include it on tex templates (Pongracz I)
+* Fixed bug 1195, goods and services w/invoice search useless (Chris T)
+* Fixed bug 1247, cannot save shipping record (Chris T)
+* Fixed bug 1255, no such function timecard__report (Chris T)
+* Fixed bug 1256, No such function: inventory_get_item_at_day (Chris T)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
+
+Changelog for 1.4.4
+* Fixed bug 1225 error saving order/quote for natural persons (Chris T)
+* Fixed bug 1235, natural persons' orders not on report (Chris T)
+* Fixed bug, insufficient perms on account_checkpoint_id_seq (Chris T)
+* Fixed bug 1238, web services do not run on starman (Chris T)
+* Fixed bug 1233, insufficient error handling with templates (Chris T)
+* Added Product Receipt templates for printing vendor invoices (Chris T)
+* (Bug Report 1229), added ID card and birthdate tracking (Chris T)
+* Fixed bug 1234, trying to save user before employee thows error (Chris T)
+* Fixed bug 1239, reopening on previous close throws error (Chris T)
+* Fixed upgrade bug, referential errors upgrading 1.2 data (Chris T)
+* Fixed bug 1243, dd.mm.yyyy formats don't work (Chris T)
+* Quieted some test cases (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.4.3
+* Added sanity check for psql availability (Bug 1226, Chris T)
+* Added db fix for older eca's missing currencies (Bug 1228, Chris T)
+* Fixed bug 1230, pricematrix for vendors not respected (Chris T)
+* Updated installation instructions with more Apache info (Bill A)
+* Improvements in testing LedgerSMB::Sysconfig (bug 1232, Chris T)
+* Fixing sales tax rounding precision (bug via email, Chris T)
+* Added Starman/Plack support (Chris T)
+* Fixed duplicate user handling in setup.pl (Chris T)
+* renamed 'Post as Saved' to 'Post', 'Save as Shown' to 'Save Draft' (Chris T)
+
+Bill A is Bill Appelbe
+Chris T is Chris Travers
+
+Changelog for 1.4.2
+* Separated address classes for employees out (bug 817, Chris T)
+* Fixed dojo issue with user address screen (Chris T)
+* Fixed bug 1219, log message of warning trial_balance/search.css (Chris T)
+* Fixed issue with demo_with_images invoice.tex item description (Chris T)
+* Display vendor's sku if available on orders and invoices, bug 1218 (Chris T)
+* Fixed error unable to delete order (Chris T)
+* Fixed bug 1223 prices 0 if selected from parts search (Chris T)
+* Fixed issue, cannot log in after creating batch. (Chris T)
+* Fixed bug 1224, account dropdowns on budget screen not working (Chris T)
+
+
+Chris T is Chris Travers
+
+Changelog for 1.4.1
+* Fixed bug 1205, copy does not copy roles (Chris T)
+* Added multi-date inventory uploads (Erik H)
+* Fixed bug 1207, date format not displated on preferences (Chris T)
+* Fixed bug 1208, username does not appear on menu block (Chris T)
+* Fixed bug 1209, Types of Businesses report shows total discounts (Chris T)
+* Fixed bug 1210, Cannot list business reporting units (Chris T)
+* Fixed bug 1211, Sequences always set to allow input (Chris T)
+* Fixed bug 1213, opaque error when no tax form selected on report (Chris T)
+* Fixed bug 1214, Company db name not displated on some reports (Chris T)
+* Fixed bug 1212, Fixed error regaring no default action (Chris T)
+* Fixed bug 1215, duplicate user throws incorrect error (Chris T)
+* Fixed bug 1204, Unable to select blank salutation (Chris T)
+* Fixed bug 1198, incorrect rewrite rule on Apache 2.4 (Chris T)
+* Fixed bug 1217, Link to business units on Business_Unit report was hardcoded (Pongracz I)
+* Fixed bug causing COGS dates to be set null (Chris T)
+
+Chris T is Chris Travers
+Erik H is Erik Huelsmann
+Pongracz I is Pongracz Istv√an
+
+Changelog for 1.4.0
 General Enhancements:
 * Performance enhancements on menu routines (Chris T and Steven M)
 * Added +/- selection indicators to menu CSS (Chris T)
@@ -41,6 +257,7 @@ Installation/Upgrade
 * LaTeX format detection now run-time call, not configured (Chris T)
 * configure_apache.sh: Add search for apache user & config path
   Do not overwrite ledgersmb-httpd.conf without warning (Havard S)
+* Validation of database schema load processes in setup.pl (Erik H)
 
 Code/API improvements
 * scripts/* files moved to make inheritance possible (Chris T)
@@ -107,10 +324,98 @@ Changelog for 1.3 Series
 Initial Release:  Monday, Oct 12 2011
 Supported Presently
 
+Changelog for 1.3.47
+* Fixed bug 1271, default payment account not set on 2nd line (Chris T)
+* Fixed bug 1275, post error due to trying to double encode arry (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.3.46
+* Fixing bug 1257, ordnumber shows all orders open/closd (Chris T)
+* Fixed bug 1259, id from new_shipto overwrites form-id (Pongracz I)
+* Fixed related bug to 1259 on invoices (Chris T)
+* Some log quieting fixes. (Chris T)
+* Fixed bug 1262, cannot post overpayment with formatted numbers (Chris T)
+* Fixed bug 1260, Multiple vendor skus breaks display of invoice (Chris T)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
+
+Changelog for 1.3.45
+* Cleaned up sql files so App::LedgerSMB::Admin works (Chris T)
+* Fixed pricematrix prices not respected for vendors (Chris T, bug 1230)
+* Added tests for Sysconfig (Chris T, bug 1232)
+* Added first-rate starman/plack support (Chris T)
+* Fixed bug 1239, reopening on previous close throws error (Chris T)
+* Quieted some of the test cases (Chris T)
+* Fixed bug 1244, manually entered tax crashes invoice on edit (Chris T)
+* Fixed bug 1251, some backports failing due to misplacing db cnx (Chris T)
+* Fixed bug 1241, join projection, amounts in invoice details report (Chris T)
+* Fixed internal server error on single payment interface (Chris T)
+* Fixed bug 1240, false alarms of customer credit usage exceeded (Chris T)
+* Adding tax_id hidden field to order and offer forms to be able to include it on tex templates (Pongracz I)
+* Fixed bug 1258, manual tax number entries do not respect number formats (Pongracz I)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
+
+Changelog for 1.3.44
+* Allow blank salutations, bug 1204. (Chris T)
+* Easier creation of select widgets with blanks. (Chris T)
+* Display vendor's sku if available on orders and invoices, bug 1218 (Chris T)
+* Fixed issue where locked batch prevents login (Chris T)
+
+Chris T is Chris Travers
+
+Changelog for 1.3.43
+* Fixed bug 1136, manual tax not respecting user number formats (Chris T)
+* Fixed bug 1171, invoices showing as current when not (Chris T)
+* Fixed bug 1140, shipto causes exchangerate format lost (Chris T)
+* Fixed errors running custom queries where no table yet defined (Chris T)
+* Use Shipto button works right away when adding from invoice (Chris T)
+* Fixed bug 1196, number formatting issue when decimal separator is comma, like 1.000,00 (Pongracz I)
+* Fixed bug 1169, sorting orders results in empty list (Chris T)
+* Fixed bug 1173, employee manager checkbox badly handled (Chris T)
+* Fixed bug 1199, can change shipto with no effect after positng (Chris T)
+* Fixed issue 1183, added login name to menu pane (Chris T)
+* Fixed bug 1185, email address not shown when emailing statements (Chris T)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
+
+
+Changelog for 1.3.42
+* Fix for missing emails when emailing orders/quotations (1073, Chris T)
+* Fix doubled email addresses when emailing invoice (1186, Pongracz I)
+* Hungarian translation changes (Pongracz I)
+* Fix for inactive customers showing up on receipt search (1095, Chris T)
+* Hungarian translation changes (Pongracz I)
+* View file_links is no longer dropped before rebuild (Chris T, 1099)
+* Fix for invoice with shipto linking to wrong one on report (Chris T, 1104)
+* Fix for shipto's not being automatically checked (Chris T, 1100)
+* Fixed forex rounding issue with single payments not posting (Chris T)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
+
+Changelog for 1.3.41
+* Fix for invalid ref when entering payment  (John Locke)
+
 Changelog for 1.3.40
 * Updated nginx configuration (Pongracz I)
 * GL account search now will search within descriptions for matches (Chris T)
 * Fixed #1139 (Vendor can show up as default customer in sales order, confusing...) (Pongracz I)
+* Printing without an invoice number now errors instead of increments (Chris T)
+* Fixed internal server error using cash/payment (Chris T)
+* Fixed #1133 (FX rate changed after selecting part/service) (Pongracz I)
+* Fixed #1078 (Don't populate all empty projects automatically) (Pongracz I)
+* Fixed #1139 (Vendor can show up as default customer in sales order,
+confusing...) (Pongracz I)
+* fixes cogs qty/allocated type mismatch (Chris T)
+* Fixed manual tax invoices not reversing properly (Chris T, 1134)
+
+Chris T is Chris Travers
+Pongracz I is Pongracz Istvan
 
 Changelog for 1.3.39
 * Fixed Internal Server Error clicking through ar/ap report (Chris T, 1022)

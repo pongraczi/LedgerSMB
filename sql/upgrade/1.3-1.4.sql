@@ -6,7 +6,6 @@ ALTER TABLE entity_credit_account ENABLE TRIGGER ALL;
 DELETE FROM person;
 DELETE FROM company;
 DELETE FROM entity;
-DELETE FROM lsmb13.session; -- Cleares out locks
 
 --to preserve user modifications tshvr4
 DELETE FROM country;
@@ -129,8 +128,8 @@ SELECT e.id, pc.contact_class_id, pc.contact, pc.description
    FROM lsmb13.person_to_contact pc
    JOIN lsmb13.person p ON p.id = pc.person_id
    JOIN lsmb13.entity e ON e.id = p.entity_id;
-INSERT INTO entity_bank_account (id, entity_id, bic, iban)
-SELECT id, entity_id, coalesce(bic,''), iban FROM lsmb13.entity_bank_account;
+INSERT INTO entity_bank_account (id, entity_id, bic, iban, remark)
+SELECT id, entity_id, coalesce(bic,''), iban, remark FROM lsmb13.entity_bank_account;
 INSERT INTO entity_credit_account SELECT * FROM lsmb13.entity_credit_account;
 UPDATE entity_credit_account SET curr = defaults_get_defaultcurrency()
  WHERE curr IS NULL;
@@ -292,6 +291,13 @@ ALTER TABLE ap ENABLE TRIGGER ALL;
 
 INSERT INTO transactions (id, table_name, locked_by) 
 SELECT id, table_name, locked_by FROM lsmb13.transactions;
+
+INSERT INTO transactions (id, table_name)
+SELECT id, 'ar' FROM ar WHERE id not in (select id from transactions);
+INSERT INTO transactions (id, table_name)
+SELECT id, 'ap' FROM ap WHERE id not in (select id from transactions);
+INSERT INTO transactions (id, table_name)
+SELECT id, 'gl' FROM gl WHERE id not in (select id from transactions);
 
 INSERT INTO voucher SELECT * FROM lsmb13.voucher;
 
@@ -534,6 +540,7 @@ INSERT INTO parts_translation SELECT * FROM lsmb13.parts_translation;
 INSERT INTO user_preference 
 SELECT id, language, stylesheet, printer, dateformat, numberformat
   FROM lsmb13.user_preference;
+update user_preference set dateformat = dateformat || 'yy' where length(dateformat) = 8;
 --INSERT INTO recurring SELECT * FROM lsmb13.recurring;--tshvr4 fields differ
 INSERT INTO recurring(id,reference,startdate,nextdate,enddate,howmany,payment) SELECT id,reference,startdate,nextdate,enddate,howmany,payment FROM lsmb13.recurring;
 INSERT INTO payment_type SELECT * FROM lsmb13.payment_type;

@@ -14,7 +14,7 @@ Batch/voucher management model for LedgerSMB 1.3
 
 package LedgerSMB::Batch;
 use LedgerSMB::Setting;
-use base qw(LedgerSMB::DBObject);
+use base qw(LedgerSMB::PGOld);
 
 =item get_new_info
 
@@ -38,7 +38,7 @@ Saves the batch info and populates the id hashref value with the id inserted.
 
 sub create {
     $self = shift @_;
-    my ($ref) = $self->exec_method(funcname => 'batch_create');
+    my ($ref) = $self->call_dbmethod(funcname => 'batch_create');
     $self->{id} = $ref->{batch_create};
     return $ref->{id};
 }
@@ -51,7 +51,7 @@ Deletes the voucher specified by $id.
 
 sub delete_voucher {
     my ($self, $voucher_id) = @_;
-    $self->call_procedure(procname => 'voucher__delete', args => [$voucher_id]);
+    $self->call_procedure(funcname => 'voucher__delete', args => [$voucher_id]);
 }
 
 =item unlock($id)
@@ -62,7 +62,7 @@ Unlocks a given batch
 
 sub unlock{
     my ($self, $id) = @_;
-    $self->call_procedure(procname => 'batch__unlock', args => [$id]);
+    $self->call_procedure(funcname => 'batch__unlock', args => [$id]);
 }
 
 =item get_search_criteria
@@ -83,7 +83,7 @@ List of all users
 sub get_search_criteria {
     $self = shift @_;
     my ($custom_types) = @_;
-    @{$self->{batch_classes}} = $self->exec_method(
+    @{$self->{batch_classes}} = $self->call_dbmethod(
          funcname => 'batch_list_classes'
     );
     for (keys %$custom_types){
@@ -92,7 +92,7 @@ sub get_search_criteria {
         }
     }
 
-    @{$self->{batch_users}} = $self->exec_method(
+    @{$self->{batch_users}} = $self->call_dbmethod(
          funcname => 'batch_get_users'
     );
     unshift @{$self->{batch_users}}, {username => $self->{_locale}->text('Any'), id => '0', entity_id => '0'};
@@ -149,7 +149,7 @@ Returns the appropriate search as detected by get_search_method.
 sub get_search_results {
     my ($self, $args) = @_;
 	my $search_proc = $self->get_search_method($args);
-    @{$self->{search_results}} = $self->exec_method(funcname => $search_proc);
+    @{$self->{search_results}} = $self->call_dbmethod(funcname => $search_proc);
     return @{$self->{search_results}};
 }
 
@@ -162,7 +162,7 @@ Returns the class_id of batch class specified by its label.
 sub get_class_id {
     my ($self, $type) = @_;
     @results = $self->call_procedure(
-                                     procname => 'batch_get_class_id', 
+                                     funcname => 'batch_get_class_id', 
                                      args     => [$type]
     );
     my $result = pop @results;
@@ -178,7 +178,7 @@ reports, financial statements, and more.
 
 sub post {
     my ($self) = @_;
-    ($self->{post_return_ref}) = $self->exec_method(funcname => 'batch_post');
+    ($self->{post_return_ref}) = $self->call_dbmethod(funcname => 'batch_post');
     return $self->{post_return_ref};
 }
 
@@ -190,7 +190,7 @@ Deletes the unapproved batch and all vouchers under it.
 
 sub delete {
     my ($self) = @_;
-    ($self->{delete_ref}) = $self->exec_method(funcname => 'batch_delete');
+    ($self->{delete_ref}) = $self->call_dbmethod(funcname => 'batch_delete');
     return $self->{delete_ref};
 }
 
@@ -202,7 +202,7 @@ $self->{vouchers}
 
 sub list_vouchers {
     my ($self) = @_;
-    @{$self->{vouchers}} = $self->exec_method(funcname => 'voucher_list');
+    @{$self->{vouchers}} = $self->call_dbmethod(funcname => 'voucher_list');
     return @{$self->{vouchers}};
 }
 
@@ -214,7 +214,7 @@ Gets the batch and merges information with the current batch object.
 
 sub get {
     my ($self) = @_;
-    my ($ref) = $self->exec_method(funcname => 'voucher_get_batch');
+    my ($ref) = $self->call_dbmethod(funcname => 'voucher_get_batch');
     $self->merge($ref);
 }
 

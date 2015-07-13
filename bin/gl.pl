@@ -50,6 +50,7 @@ use LedgerSMB::GL;
 use LedgerSMB::PE;
 use LedgerSMB::Template;
 use LedgerSMB::Setting::Sequence;
+use LedgerSMB::Company_Config;
 
 require 'bin/bridge.pl'; # needed for voucher dispatches
 require "bin/arap.pl";
@@ -143,7 +144,7 @@ sub add_pos_adjust {
 }
 
 sub new {
-     for my $row (1 .. $form->{rowcount}){
+     for my $row (0 .. $form->{rowcount}){
          for my $fld(qw(accno projectnumber acc debit credit source memo)){
             delete $form->{"${fld}_${row}"};
          }
@@ -163,7 +164,6 @@ sub add {
 "$form->{script}?action=add&transfer=$form->{transfer}&path=$form->{path}&login=$form->{login}&sessionid=$form->{sessionid}"
       unless $form->{callback};
 
-    &create_links;
     if (!$form->{rowcount}){
         $form->{rowcount} = ( $form->{transfer} ) ? 3 : 9;
     }
@@ -179,6 +179,8 @@ sub add {
 
 sub display_form
 {
+    $form->{separate_duties}
+        = $LedgerSMB::Company_Config::settings->{separate_duties};
     #Add General Ledger Transaction
     $form->all_business_units($form->{transdate}, undef, 'GL');
     @{$form->{sequences}} = LedgerSMB::Setting::Sequence->list('glnumber')
@@ -270,13 +272,13 @@ sub display_form
 		    { ndx => 1, key => 'U', value => $locale->text('Update') },
 		  'post' => { ndx => 3, key => 'O', value => $locale->text('Post') },
                   'edit_and_save' => {ndx => 4, key => 'V', 
-                          value => value => $locale->text('Edit and Save') },
+                          value => $locale->text('Save Draft') },
                   'save_temp' =>
                     { ndx   => 9, 
                       key   => 'T', 
                       value => $locale->text('Save Template') },
-		  'post_as_new' =>
-		    { ndx => 6, key => 'N', value => $locale->text('Post as new') },
+		  'save_as_new' =>
+		    { ndx => 6, key => 'N', value => $locale->text('Save as new') },
 		  'schedule' =>
 		    { ndx => 7, key => 'H', value => $locale->text('Schedule') },
                   'new' => 
@@ -293,7 +295,7 @@ sub display_form
 	      if ( $form->{id}) {
                   $a{'new'} = 1;
 
-		  for ( 'post_as_new', 'schedule' ) { $a{$_} = 1 }
+		  for ( 'save_as_new', 'schedule' ) { $a{$_} = 1 }
 
 		  for ( 'post', 'delete' ) { $a{$_} = 1 }
 	      }
@@ -308,7 +310,7 @@ sub display_form
 		$button{approve} = { 
 			ndx   => 3, 
 			key   => 'S', 
-			value => $locale->text('Post as Saved') };
+			value => $locale->text('Post') };
 		$a{approve} = 1;
 		$a{edit_and_save} = 1;
 		$a{update} = 1;
@@ -316,10 +318,12 @@ sub display_form
 		    $button{edit_and_save} = { 
 			ndx   => 4, 
 			key   => 'O', 
-			value => $locale->text('Save as Shown') };
+			value => $locale->text('Save Draft') };
 		}
-		delete $button{post_as_new};
 		delete $button{post};
+	      }
+	      if ($form->{id} && ($form->{approved} || $form->{batch_id})) {
+		  delete $button{post};
 	      }
 
 	      for ( keys %button ) { delete $button{$_} if !$a{$_} }      
@@ -393,7 +397,7 @@ sub save_temp {
                   };
         }
     }
-    $template = LedgerSMB::DBObject::TransTemplate->new(base => $lsmb);
+    $template = LedgerSMB::DBObject::TransTemplate->new({base => $lsmb});
     $template->save;
     $form->redirect( $locale->text('Template Saved!') );
 }
@@ -416,7 +420,7 @@ sub display_row
 	$temphash1->{accnoset}=1;
         $temphash1->{projectset}=1;
         $temphash1->{fx_transactionset}=1;
-	if ($init)
+	if (!defined $form->{"accno_$i"} || ! $form->{"accno_$i"})
 	{
 			      $temphash1->{accnoset}=0;   #use  @{ $form->{all_accno} }
 			      $temphash1->{projectset}=0; #use  @{ $form->{all_project} }
@@ -424,7 +428,9 @@ sub display_row
 			      
         }
         else
-	{	    
+	{
+                              $form->{"debit_$i"} = LedgerSMB::PGNumber->from_input($form->{"debit_$i"});
+                              $form->{"credit_$i"}= LedgerSMB::PGNumber->from_input($form->{"credit_$i"}); 	    
 			      $form->{totaldebit}  += $form->{"debit_$i"};
 			      $form->{totalcredit} += $form->{"credit_$i"};			      
 			      for (qw(debit credit)) {
@@ -505,17 +511,21 @@ sub edit {
          $form->{department}=$form->{departmentdesc}."--".$form->{department_id};
     }
     $i = 0;
+
+    my $minusOne    = new LedgerSMB::PGNumber(-1);#HV make sure BigFloat stays BigFloat
+    my $plusOne     = new LedgerSMB::PGNumber(1);#HV make sure BigFloat stays BigFloat
+
     foreach $ref ( @{ $form->{GL} } ) {
         $form->{"accno_$i"} = "$ref->{accno}--$ref->{description}";
         $form->{"projectnumber_$i"} = "$ref->{projectnumber}--$ref->{project_id}";
         for (qw(fx_transaction source memo)) { $form->{"${_}_$i"} = $ref->{$_} }
         if ( $ref->{amount} < 0 ) {
             $form->{totaldebit} -= $ref->{amount};
-            $form->{"debit_$i"} = $ref->{amount} * -1;
+            $form->{"debit_$i"} =  $ref->{amount} * $minusOne;
         }
         else {
             $form->{totalcredit} += $ref->{amount};
-            $form->{"credit_$i"} = $ref->{amount};
+            $form->{"credit_$i"} =  $ref->{amount} * $plusOne;
         }
         for my $cls (@{$form->{bu_class}}){
             $form->{"b_unit_$cls->{id}_$i"} = $ref->{"b_unit_$cls->{id}"};
@@ -523,6 +533,7 @@ sub edit {
 
         $i++;
     }
+
    if ($form->{id}){
        GL->get_files($form, $locale);
    }
@@ -535,25 +546,6 @@ sub edit {
 sub create_links {
 
     GL->transaction( \%myconfig, \%$form );
-
-
-    # departments
-    if ( @{ $form->{all_department} } ) {
-        $form->{departmentset} = 1;
-        for ( @{ $form->{all_department} } ) {
-            $_->{departmentstyle}=$_->{description}."--".$_->{id};
-        }
-    }
-
-    # projects
-    if ( @{ $form->{all_project} } ) {
-       $form->{projectset}=1; 
-       for ( @{ $form->{all_project} } ) {
-	  $_->{projectstyle}=$_->{projectnumber}."--".$_->{id};
-       }
-    }
-
-  
 
 }
 
@@ -580,7 +572,6 @@ sub gl_subtotal_tt {
 }
 
 sub gl_subtotal {
-
     $subtotaldebit =
       $form->format_amount( \%myconfig, $subtotaldebit, 2, "&nbsp;" );
     $subtotalcredit =
@@ -605,7 +596,9 @@ sub gl_subtotal {
 }
 
 sub update {
+     my $min_lines = $LedgerSMB::Company_Config::settings->{min_empty};
 
+     $form->{transdate} = LedgerSMB::PGDate->from_input($form->{transdate})->to_output();
      if ( $form->{transdate} ne $form->{oldtransdate} ) {
          $form->{oldtransdate} = $form->{transdate};
      } 
@@ -662,7 +655,8 @@ sub update {
     for $i ( $count  .. $form->{rowcount} ) {
         for (@flds) { delete $form->{"${_}_$i"} }
     }
-    $form->{rowcount} = $count;
+
+    $form->{rowcount} = $count + $min_lines;
  
     
     
@@ -741,3 +735,8 @@ sub check_balanced {
     }
 }
 
+sub save_as_new {
+    for (qw(id printed emailed queued)) { delete $form->{$_} }
+    $form->{approved} = 0;
+    &post;
+}

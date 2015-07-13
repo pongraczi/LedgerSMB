@@ -43,7 +43,7 @@ use LedgerSMB::PriceMatrix;
 use LedgerSMB::Sysconfig;
 use LedgerSMB::Setting;
 use LedgerSMB::App_State;
-use Math::BigFloat;
+use LedgerSMB::PGNumber;
 
 =over
 
@@ -79,6 +79,7 @@ sub add_cogs {
 sub post_invoice {
     my ( $self, $myconfig, $form ) = @_;
     $form->{crdate} ||= 'now';
+    delete $form->{reverse} unless $form->{reverse};
 
     $form->all_business_units;
     if ($form->{id}){
@@ -168,9 +169,10 @@ sub post_invoice {
             &reverse_invoice( $dbh, $form );
         }
         else {
-            $query = qq|INSERT INTO ap (id) VALUES (?)|;
+            $query = qq|INSERT INTO ap (id, is_return) VALUES (?, ?)|;
             $sth   = $dbh->prepare($query);
-            $sth->execute( $form->{id} ) || $form->dberror($query);
+            $sth->execute( $form->{id} , $form->{is_return} ) 
+                || $form->dberror($query);
         }
     }
 
@@ -237,6 +239,41 @@ sub post_invoice {
             $pth->finish;
 
             # project
+            push( @{ $form->{runningnumber} }, $runningnumber++ );
+            push( @{ $form->{number} },        $form->{"partnumber_$i"} );
+            push( @{ $form->{image} },        $form->{"image_$i"} );
+            push( @{ $form->{sku} },           $form->{"sku_$i"} );
+            push( @{ $form->{serialnumber} },  $form->{"serialnumber_$i"} );
+
+            push( @{ $form->{bin} },         $form->{"bin_$i"} );
+            warn $form->{"description_$i"};
+            push( @{ $form->{item_description} }, $form->{"description_$i"} );
+            push( @{ $form->{itemnotes} },   $form->{"notes_$i"} );
+            push(
+                @{ $form->{qty} },
+                $form->format_amount( $myconfig, $form->{"qty_$i"} )
+            );
+
+            push(
+                @{ $form->{ship} },
+                $form->format_amount( $myconfig, $form->{"qty_$i"} )
+            );
+
+            push( @{ $form->{unit} },         $form->{"unit_$i"} );
+            push( @{ $form->{deliverydate} }, $form->{"deliverydate_$i"} );
+
+            push( @{ $form->{projectnumber} }, $form->{"projectnumber_$i"} );
+
+            push( @{ $form->{sellprice} }, $form->{"sellprice_$i"} );
+
+            push( @{ $form->{listprice} }, $form->{"listprice_$i"} );
+
+            push(
+                @{ $form->{weight} },
+                $form->format_amount(
+                    $myconfig, $form->{"weight_$i"} * $form->{"qty_$i"}
+                )
+            );
 
             if ( $form->{"projectnumber_$i"} ne "" ) {
                 ( $null, $project_id ) =
@@ -277,8 +314,8 @@ sub post_invoice {
                     $form->{'taxaccounts'}
                 );
 
-                $tax   = Math::BigFloat->bzero();
-                $fxtax = Math::BigFloat->bzero();
+                $tax   = LedgerSMB::PGNumber->bzero();
+                $fxtax = LedgerSMB::PGNumber->bzero();
     
                 if ( $form->{taxincluded} ) {
                     $tax += $amount =
@@ -341,7 +378,8 @@ sub post_invoice {
 				       deliverydate = ?,
 				       serialnumber = ?,
                                        precision = ?,
-				       notes = ?
+				       notes = ?,
+                                       vendor_sku = ?
 				 WHERE id = ?|;
             $sth = $dbh->prepare($query);
             $sth->execute(
@@ -352,6 +390,7 @@ sub post_invoice {
                 $form->{"unit_$i"},        $form->{"deliverydate_$i"},
                 $form->{"serialnumber_$i"},
                 $form->{"precision_$i"},   $form->{"notes_$i"},       
+                $form->{"partnumber_$i"},
                 $invoice_id
             ) || $form->dberror($query);
 
@@ -780,6 +819,7 @@ sub post_invoice {
 		       language_code = ?,
 		       ponumber = ?, 
                        approved = ?,
+                       reverse = ?,
 		       crdate = ?
 		 WHERE id = ?|;
 
@@ -792,7 +832,7 @@ sub post_invoice {
         $form->{taxincluded},   $form->{notes},         $form->{intnotes},
         $form->{currency},
         $form->{language_code}, $form->{ponumber},      
-        $approved,              $form->{crdate},
+        $approved,              $form->{reverse},       $form->{crdate},
         $form->{id}
     ) || $form->dberror($query);
 
@@ -993,9 +1033,9 @@ sub retrieve_invoice {
               $form->db_parse_numeric(sth=>$tax_sth,hashref=>$taxref);
               $form->{manual_tax} = 1;
               my $taccno = $taxref->{accno};
-              $form->{"mt_amount_$taccno"} = Math::BigFloat->new($taxref->{amount} * -1);
+              $form->{"mt_amount_$taccno"} = LedgerSMB::PGNumber->new($taxref->{amount} * -1);
               $form->{"mt_rate_$taccno"}  = $taxref->{rate};
-              $form->{"mt_basis_$taccno"} = Math::BigFloat->new($taxref->{tax_basis} * -1);
+              $form->{"mt_basis_$taccno"} = LedgerSMB::PGNumber->new($taxref->{tax_basis} * -1);
               $form->{"mt_memo_$taccno"}  = $taxref->{memo};
               $form->{"mt_ref_$taccno"}  = $taxref->{source};
         }
@@ -1111,7 +1151,10 @@ sub retrieve_invoice {
 
         # retrieve individual items
         $query = qq|
-			   SELECT i.id as invoice_id,p.partnumber, i.description, i.qty, 
+			   SELECT i.id as invoice_id,
+                                  coalesce(i.vendor_sku, p.partnumber) 
+                                        as partnumber,
+                                  i.description, i.qty, 
 			          i.fxsellprice, i.sellprice, i.precision,
 			          i.parts_id AS id, i.unit, p.bin, 
 			          i.deliverydate,
@@ -1130,7 +1173,7 @@ sub retrieve_invoice {
 			    WHERE i.trans_id = ?
 		         ORDER BY i.id|;
         $sth = $dbh->prepare($query);
-        $sth->execute( $form->{language_code}, $form->{id} )
+        $sth->execute( $form->{vendor_id}, $form->{language_code}, $form->{id} )
           || $form->dberror($query);
 
         my $bu_sth = $dbh->prepare(
@@ -1242,11 +1285,13 @@ sub retrieve_item {
     else {
         $where .= " ORDER BY 2";
     }
-
     my $query = qq|
-		   SELECT p.id, p.partnumber, p.description,
-		          pg.partsgroup, p.partsgroup_id,
-		          p.lastcost AS sellprice, p.unit, p.bin, p.onhand, 
+		   SELECT p.id, coalesce(
+                                CASE WHEN pv.partnumber <> '' THEN pv.partnumber
+                                     ELSE NULL END, p.partnumber) as partnumber, 
+                          p.description, pg.partsgroup, p.partsgroup_id,
+		          coalesce(pv.lastcost, p.lastcost) AS sellprice, 
+                          p.unit, p.bin, p.onhand, 
 		          p.notes, p.inventory_accno_id, p.income_accno_id, 
 		          p.expense_accno_id, p.partnumber AS sku, p.weight,
 		          t1.description AS translation, 
@@ -1255,6 +1300,8 @@ sub retrieve_item {
                 LEFT JOIN makemodel mm ON (mm.parts_id = p.id AND mm.barcode = |
                              . $dbh->quote($form->{"partnumber_$i"}) . qq|)
 		LEFT JOIN partsgroup pg ON (pg.id = p.partsgroup_id)
+                LEFT JOIN partsvendor pv ON (pv.parts_id = p.id
+                                           AND pv.credit_id = ?)
 		LEFT JOIN translation t1 
 		          ON (t1.trans_id = p.id AND t1.language_code = ?)
 		LEFT JOIN translation t2 
@@ -1262,7 +1309,9 @@ sub retrieve_item {
 		          AND t2.language_code = ?)
 	         $where|;
     my $sth = $dbh->prepare($query);
-    $sth->execute( $form->{language_code}, $form->{language_code} )
+    #die "$query:$i";
+    $sth->execute( $form->{vendor_id}, $form->{language_code}, 
+                   $form->{language_code} )
       || $form->dberror($query);
 
     # foreign currency
@@ -1275,6 +1324,7 @@ sub retrieve_item {
 		  JOIN partstax pt ON (pt.chart_id = c.id)
 		 WHERE pt.parts_id = ?|;
     my $tth = $dbh->prepare($query) || $form->dberror($query);
+    $form->{item_list} = [];
 
     # price matrix
     my $pmh = PriceMatrix::price_matrix_query( $dbh, $form );
@@ -1388,7 +1438,11 @@ sub vendor_details {
                   JOIN entity e ON eca.entity_id = e.id
                   JOIN company co ON co.entity_id = e.id
              LEFT JOIN eca_to_location e2l ON eca.id = e2l.credit_id
-             LEFT JOIN location l ON l.id = e2l.location_id
+                                     and e2l.location_class = 1
+             LEFT JOIN entity_to_location el ON eca.entity_id = el.entity_id
+                                     and el.location_class = 1
+             LEFT JOIN location l ON l.id = 
+                                     coalesce(e2l.location_id, el.location_id)
              LEFT JOIN country c ON l.country_id = c.id
              LEFT JOIN (select max(phone) as phone, max(fax) as fax, credit_id
                           FROM (SELECT CASE WHEN contact_class_id =1 THEN contact
@@ -1399,7 +1453,7 @@ sub vendor_details {
                                   FROM eca_to_contact) ct_base
                         GROUP BY credit_id) ct ON ct.credit_id = eca.id
              LEFT JOIN entity_bank_account ba ON ba.id = eca.bank_account
-		 WHERE eca.id = ? and location_class = 1|;
+		 WHERE eca.id = ?|;
     my $sth = $dbh->prepare($query);
     $sth->execute( $form->{vendor_id} ) || $form->dberror($query);
 
@@ -1557,8 +1611,8 @@ sub get_taxcheck
 
 }
 
+=back
 
-
-
+=cut
 
 1;

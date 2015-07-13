@@ -81,7 +81,7 @@ sub columns {
 
     {col_id => 'id',
        name => LedgerSMB::Report::text('ID'),
-       type => 'text',
+       type => 'href',
      pwidth => 1, },
 
     {col_id => 'transdate',
@@ -221,15 +221,16 @@ Runs the report, and assigns rows to $self->rows.
 
 sub run_report{
     my ($self) = @_;
-    my @rows = $self->exec_method({funcname => 'draft__search'});
+    my @rows = $self->call_dbmethod(funcname => 'draft__search');
     for my $ref (@rows){
-        my $script = $self->type;
+        my $script = $ref->{type};
         $ref->{row_id} = $ref->{id};
-        if ($ref->{invoice}){
-            $script = 'is' if $self->type eq 'ar';
-            $script = 'ir' if $self->type eq 'ap';
+        if ($ref->{invoice}) {
+            $script = 'is' if $script eq 'ar';
+            $script = 'ir' if $script eq 'ap';
         }
         $ref->{reference_href_suffix} = "$script.pl?action=edit&id=$ref->{id}";
+        $ref->{id_href_suffix} = $ref->{reference_href_suffix};
     }
     $self->rows(\@rows);
 }

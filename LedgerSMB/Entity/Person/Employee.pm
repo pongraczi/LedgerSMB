@@ -69,7 +69,15 @@ Organizational role.  Is manager, user, or administrator
 
 =cut
 
-has role => (is => 'rw', isa => 'Str', required => 0);
+has role => (is => 'rw', isa => 'Maybe[Str]', required => 0);
+
+=item is_manager
+
+Whether the employee is a manager.
+
+=cut
+
+has is_manager => (is => 'rw', isa => 'Bool');
 
 =item ssn
 
@@ -93,7 +101,7 @@ Entity id of manager
 
 =cut
 
-has manager_id => (is => 'rw', isa => 'Int', required => 0);
+has manager_id => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item employeenumber
 
@@ -118,7 +126,7 @@ blessed if the employee is found or undef otherwise.
 
 sub get {
     my ($self, $id) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'employee__get',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'employee__get',
                                           args => [$id]);
     return undef unless $ref->{control_code};
     $ref->{entity_class} = 3;
@@ -135,7 +143,7 @@ entity_id.
 
 sub get_by_cc {
     my ($self, $cc) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'person__get_by_cc',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'person__get_by_cc',
                                           args => [$cc]);
     return undef unless $ref->{control_code};
     return get($ref->{id});
@@ -149,10 +157,10 @@ Saves the employee.  Must be a blessed reference.
 
 sub save {
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'person__save'});
+    my ($ref) = $self->call_dbmethod(funcname => 'person__save');
     my ($id) = values(%$ref);
     $self->entity_id($id);
-    $self->exec_method({funcname => 'employee__save'});
+    $self->call_dbmethod(funcname => 'employee__save');
 }
 
 =back

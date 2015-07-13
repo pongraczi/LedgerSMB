@@ -11,7 +11,7 @@ and accounts).
 
 =over
 
-=item LedgerSMB::DBObject
+=item LedgerSMB::PGOld
 
 =back
 
@@ -21,7 +21,7 @@ and accounts).
 
 use strict;
 package LedgerSMB::DBObject::Account;
-use base qw(LedgerSMB::DBObject);
+use base qw(LedgerSMB::PGOld);
 
 =over
 
@@ -63,24 +63,20 @@ sub save {
     if ($self->{charttype} and $self->{charttype} eq 'H') {
         $func = 'account_heading_save';
     }
-    my ($id_ref) = $self->exec_method(funcname => $func,
-                             continue_on_error => 1);
-    if (!$id_ref->{$func}){ # Didn't return anything.  Chances are this was an 
-                            # Error we trapped from the function.  Time to test
-                            # that error and display a more friendly error.
-       if ($@ =~ /Invalid link settings:\s*Summary/){
-           $self->error($self->{_locale}->text(
-               'Error: Cannot include summary account in other dropdown menus'
-           ));
-       } else {
-          $self->error($self->{_locale}->text(
-               'Internal Database Error.'
-          ) . " $@");
-       }
-    }
+    my ($id_ref) = try { $self->call_dbmethod(funcname => $func) } 
+                   catch { 
+                        if ($_ =~ /Invalid link settings:\s*Summary/){
+                            die LedgerSMB::App_State::Locale->text(
+                 'Error: Cannot include summary account in other dropdown menus'
+                            );
+                        }
+                        die LedgerSMB::App_State::Locale->text(
+                            'Internal Database Error.'
+                        ) . " $_";
+                  };
     $self->{id} = $id_ref->{$func};
     if (defined $self->{recon}){
-        $self->call_procedure(procname => 'cr_coa_to_account_save', args =>[ $self->{accno}, $self->{description}]);
+        $self->call_procedure(funcname => 'cr_coa_to_account_save', args =>[ $self->{accno}, $self->{description}]);
     }
 }
 
@@ -97,7 +93,7 @@ sub get {
     if ($self->{charttype} and $self->{charttype} eq 'H'){
       $func = 'account_heading_get';
     }
-    my @accounts =  $self->exec_method(funcname => $func);
+    my @accounts =  $self->call_dbmethod(funcname => $func);
     $self->{account_list} = [];
     for my $ref (@accounts){
         bless $ref, 'LedgerSMB::DBObject::Account';
@@ -121,7 +117,7 @@ $account->{id} must be set.
 
 sub check_transactions {
     my $self = shift @_;
-    my ($ref) = $self->exec_method(funcname => 'account_has_transactions');
+    my ($ref) = $self->call_dbmethod(funcname => 'account_has_transactions');
     $self->{has_transactions} = $ref->{'account_has_transactions'};
 } 
 
@@ -133,23 +129,31 @@ Returns true if is set up for reconciliation.  False otherwise.
 
 sub is_recon {
     my $self = shift @_;
-    my ($ref) = $self->exec_method(funcname => 'account__is_recon');
+    my ($ref) = $self->call_dbmethod(funcname => 'account__is_recon');
     $self->{account__is_recon} = $ref->{'account__is_recon'};
     return $self->{account__is_recon};
 }
 
 =item delete()
 
-Attempts to delete the account.  This will NOT succeed if the account is
-referenced in any way by any transactions, credit accounts, etc.
+Attempts to delete the account or heading.  This will NOT succeed if the
+account is referenced in any way by any transactions, credit accounts, etc.
+or in case of a heading where the heading is referenced by accounts or
+child-headings.
 
-$account->{id} must be set.
+$account->{id} and $account->{charttype} must be set.
 
 =cut
 
 sub delete {
     my $self = shift @_;
-    $self->exec_method(funcname => 'account__delete');
+    if ($self->{charttype} eq 'A') {
+	$self->call_dbmethod(funcname => 'account__delete');
+    } elsif ($self->{charttype} eq 'H') {
+	$self->call_dbmethod(funcname => 'account_heading__delete');
+    } else {
+	die "Unknown charttype."
+    }
 }
 
 =item list()
@@ -160,8 +164,20 @@ Returns a list of all accounts.
 
 sub list {
     my $self = shift @_;
-    @{$self->{account_list}} =  $self->exec_method(funcname => 'chart__list_all');
+    @{$self->{account_list}} =  $self->call_dbmethod(funcname => 'chart__list_all');
     return @{$self->{account_list}};
+}
+
+=item gifi_list()
+
+Returns a list of all gifi codes and descriptions.
+
+=cut
+
+sub gifi_list {
+    my $self = shift @_;
+    @{$self->{gifi_list}} = $self->exec_method(funcname => 'gifi__list');
+    return @{$self->{gifi_list}};
 }
 
 =item generate_links()
@@ -178,7 +194,7 @@ sub generate_links {
     my $is_summary = 0;
     my $is_custom = 0;
     my @links;
-    my @descriptions = $self->exec_method(funcname =>
+    my @descriptions = $self->call_dbmethod(funcname =>
                                           'get_link_descriptions');
     foreach my $d (@descriptions) {
        my $l = $d->{description};
@@ -203,7 +219,7 @@ Returns a list of account_heading's.  No inputs required.
 
 sub list_headings {
    my ($self) = shift @_;
-   return $self->exec_method(funcname => 'account_heading__list');
+   return $self->call_dbmethod(funcname => 'account_heading__list');
 }
 
 =back

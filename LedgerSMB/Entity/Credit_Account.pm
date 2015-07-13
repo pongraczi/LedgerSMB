@@ -29,7 +29,7 @@ and the like.
 
 package LedgerSMB::Entity::Credit_Account;
 use Moose;
-with 'LedgerSMB::DBObject_Moose';
+with 'LedgerSMB::PGObject';
 
 our $VERSION = '1.4.0';
 
@@ -68,7 +68,7 @@ This is the name that checks are written to or from.
 
 =cut
 
-has 'pay_to_name' => (is => 'rw', isa => 'Str', required => 0);
+has 'pay_to_name' => (is => 'rw', isa => 'Maybe[Str]', required => 0);
 
 =item discount
 
@@ -84,7 +84,7 @@ This is the general description for the account.
 
 =cut
 
-has 'description' => (is => 'rw', isa => 'Str', required => 0);
+has 'description' => (is => 'rw', isa => 'Maybe[Str]', required => 0);
 
 =item discount_terms
 
@@ -92,7 +92,7 @@ The number of days before the payment discount expires.
 
 =cut
 
-has 'discount_terms' => (is => 'rw', isa => 'Int', required => 0);
+has 'discount_terms' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item discount_account_id
 
@@ -100,7 +100,7 @@ The id of the account that the discounts are tracked against.
 
 =cut
 
-has 'discount_account_id' => (is => 'rw', isa => 'Int', required => 0);
+has 'discount_account_id' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item taxincluded
 
@@ -135,7 +135,7 @@ This is the number of days before an invoice is considered overdue.
 
 =cut
 
-has 'terms' => (is => 'rw', isa => 'Int', required => 0);
+has 'terms' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item meta_number
 
@@ -155,8 +155,8 @@ This is the name of the business type associated.
 
 =cut
 
-has 'business_id'   => (is => 'rw', isa => 'Int', required => 0);
-has 'business_type' => (is => 'rw', isa => 'Str', required => 0);
+has 'business_id'   => (is => 'rw', isa => 'Maybe[Int]', required => 0);
+has 'business_type' => (is => 'rw', isa => 'Maybe[Str]', required => 0);
 
 =item language_code
 
@@ -175,7 +175,7 @@ has no effect for vendors.
 
 =cut
 
-has 'pricegroup_id' => (is => 'rw', isa => 'Int', required => 0);
+has 'pricegroup_id' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item curr
 
@@ -222,7 +222,7 @@ The id for the AR or AP account, use for payment reversals.  Required on save.
 
 =cut
 
-has 'ar_ap_account_id' => (is => 'rw', isa => 'Int', required => 1);
+has 'ar_ap_account_id' => (is => 'rw', isa => 'Int');
 
 =item cash_account_id
 
@@ -230,7 +230,7 @@ The id that is the default for the cash account.
 
 =cut
 
-has 'cash_account_id' => (is => 'rw', isa => 'Int', required => 0);
+has 'cash_account_id' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item bank_account
 
@@ -252,7 +252,7 @@ Bank account for the credit account
 
 =cut
 
-has 'bank_account' => (is => 'rw', isa => 'Int', required => 0);
+has 'bank_account' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =item taxform_id   
 
@@ -260,7 +260,7 @@ This is the tax reporting form associated with the account.
 
 =cut
 
-has 'taxform_id' => (is => 'rw', isa => 'Int', required => 0);
+has 'taxform_id' => (is => 'rw', isa => 'Maybe[Int]', required => 0);
 
 =back
 
@@ -303,7 +303,7 @@ mentioned.
 
 sub get_by_id {
     my ($self, $id) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'entity_credit__get',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'entity_credit__get',
                                           args => [$id]);
     $ref->{tax_ids} = $self->_get_tax_ids($id);
     return __PACKAGE__->new(%$ref);
@@ -318,10 +318,10 @@ identified by $meta_number
 
 sub get_by_meta_number {
     my ($self, $meta_number, $entity_class) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'eca__get_by_met_number',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'eca__get_by_meta_number',
                                           args => [$meta_number, 
                                                    $entity_class]);
-    $ref->{tax_ids} = __PACKAGE__->_set_tax_ids($ref->{id});
+    $ref->{tax_ids} = __PACKAGE__->_get_tax_ids($ref->{id});
     return __PACKAGE__->new(%$ref);
 }
 
@@ -331,7 +331,7 @@ sub get_by_meta_number {
 sub _get_tax_ids {
     my ($self, $id) = @_;
     my @tax_ids;
-    my @results = __PACKAGE__->call_procedure(procname => 'eca__get_taxes',
+    my @results = __PACKAGE__->call_procedure(funcname => 'eca__get_taxes',
                                             args => [$id]);
     for my $ref (@results){
         push @tax_ids, $ref->{chart_id};
@@ -348,7 +348,7 @@ identified by $entity_id
 
 sub list_for_entity {
     my ($self, $entity_id, $entity_class) = @_;
-    my @results = __PACKAGE__->call_procedure(procname => 'entity__list_credit',
+    my @results = __PACKAGE__->call_procedure(funcname => 'entity__list_credit',
                                             args => [$entity_id, $entity_class]
     );
     for my $ref (@results){
@@ -366,7 +366,7 @@ Sets $self->current_debt and returns the same value.
 
 sub get_current_debt {
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'eca__get_current_debt'});
+    my ($ref) = $self->call_dbmethod(funcname => 'eca__get_current_debt');
     $self->current_debt($ref->{eca__get_current_debt});
     return $self->current_debt;
 }
@@ -379,10 +379,10 @@ Saves the entity credit account.  This also sets db defaults if not set.
 
 sub save {
     my ($self) = @_;
-    warn $self->{entity_class};
-    my ($ref) = $self->exec_method({funcname => 'eca__save'});
+    die 'No AR/AP Account ID Set' unless $self->ar_ap_account_id;
+    my ($ref) = $self->call_dbmethod(funcname => 'eca__save');
     $self->{id}=$ref->{eca__save};
-    $self->exec_method(funcname => 'eca__set_taxes');
+    $self->call_dbmethod(funcname => 'eca__set_taxes');
     return $self->get_by_id($ref->{eca__save});
 }
 
@@ -397,12 +397,12 @@ pricematrix_pricegroup for customers.
 sub get_pricematrix {
     my $self = shift @_;
     my $retval = {};
-    @{$retval->{pricematrix}} = $self->exec_method(
+    @{$retval->{pricematrix}} = $self->call_procedure(
                funcname => 'eca__get_pricematrix',
         args => [$self->{id}]
     );
     if ($self->{entity_class} == 1){
-        @{$retval->{pricematrix_pricegroup}}= $self->exec_method(
+        @{$retval->{pricematrix_pricegroup}}= $self->call_procedure(
                funcname => 'eca__get_pricematrix_by_pricegroup',
         args => [$self->{id}]
         );
@@ -419,7 +419,7 @@ This deletes a pricematrix line identified by $entry_id
 sub delete_pricematrix {
     my $self = shift @_;
     my ($entry_id) = @_;
-    my ($retval) = $self->exec_method(funcname => 'eca__delete_pricematrix', 
+    my ($retval) = $self->call_procedure(funcname => 'eca__delete_pricematrix', 
                            args => [$self->credit_id, $entry_id]
     );
     return $retval;
@@ -440,7 +440,7 @@ sub save_pricematrix {
         for my $prop (qw(parts_id credit_id pricebreak price lead_time
                          partnumber validfrom validto curr entry_id)){
             push @args, $request->{"${prop}_$entry_id"};
-            $self->execute_method(funcname => 'eca__save_pricematrix',
+            $self->call_procedure(funcname => 'eca__save_pricematrix',
                                       args => \@args);
         }
     }

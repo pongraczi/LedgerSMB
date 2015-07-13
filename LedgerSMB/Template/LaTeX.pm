@@ -107,10 +107,12 @@ sub preprocess {
 # Breaking this off to be used separately.
 sub escape {
     my ($vars) = shift @_;
+    return '' unless defined $vars;
 
     $vars =~ s/-/......hyphen....../g;
     $vars =~ s/\+/......plus....../g; 
     $vars =~ s/@/......amp....../g; 
+    $vars =~ s/!/......exclaim....../g; 
 
     # For some reason this doesnt handle hyphens or +'s, so handling those
     # above and below -CT
@@ -123,6 +125,7 @@ sub escape {
     $vars =~ s/\.\.\.\.\.\.hyphen\.\.\.\.\.\./-/g;
     $vars =~ s/\.\.\.\.\.\.plus\.\.\.\.\.\./+/g; 
     $vars =~ s/\.\.\.\.\.\.amp\.\.\.\.\.\./@/g; 
+    $vars =~ s/\.\.\.\.\.\.exclaim\.\.\.\.\.\./!/g; 
     return $vars;
 }
 

@@ -21,12 +21,11 @@ package LedgerSMB::Entity::Location;
 use Moose;
 use LedgerSMB::App_State;
 use LedgerSMB::Locale;
-with 'LedgerSMB::DBObject_Moose';
+with 'LedgerSMB::PGObject';
 
 my $locale = $LedgerSMB::App_State::Locale;
 if (!$locale){
    $locale = LedgerSMB::Locale->get_handle('en');
-   warn 'default language used';
 }
 
 =head1 PROPERTIES
@@ -129,7 +128,7 @@ The second line of the street address
 
 =cut
 
-has 'line_two' => (is => 'rw', 'isa' => 'Str', required => 0);
+has 'line_two' => (is => 'rw', 'isa' => 'Maybe[Str]', required => 0);
 
 =item line_three
 
@@ -137,7 +136,7 @@ The third line of the street address
 
 =cut
 
-has 'line_three' => (is => 'rw', 'isa' => 'Str', required => 0);
+has 'line_three' => (is => 'rw', 'isa' => 'Maybe[Str]', required => 0);
 
 =item city
 
@@ -153,7 +152,7 @@ Name of the state or province
 
 =cut
 
-has 'state' => (is => 'rw', 'isa' => 'Str', required => 0);
+has 'state' => (is => 'rw', 'isa' => 'Maybe[Str]', required => 0);
 
 =item mail_code
 
@@ -161,7 +160,7 @@ Zip or postal code
 
 =cut
 
-has 'mail_code' => (is => 'rw', 'isa' => 'Str', required => 0);
+has 'mail_code' => (is => 'rw', 'isa' => 'Maybe[Str]', required => 0);
 
 =item country_id
 
@@ -210,7 +209,7 @@ class (useful for retrieving billing info only).
 sub get_active {
     my ($self, $args) = @_;
     my @results;
-    for my $ref (__PACKAGE__->call_procedure(procname => 'entity__list_locations',
+    for my $ref (__PACKAGE__->call_procedure(funcname => 'entity__list_locations',
                                            args => [$args->{entity_id}]))
     {
        next if ($args->{only_class}) 
@@ -219,7 +218,7 @@ sub get_active {
     }
     return @results unless $args->{credit_id};
 
-    for my $ref (__PACKAGE__->call_procedure(procname => 'eca__list_locations',
+    for my $ref (__PACKAGE__->call_procedure(funcname => 'eca__list_locations',
                                            args => [$args->{credit_id}]))
     {
        next if ($args->{only_class}) 
@@ -247,7 +246,7 @@ sub save {
     } else {
         $procname = 'entity__location_save';
     }
-    $self->exec_method({funcname => $procname});
+    $self->call_dbmethod(funcname => $procname);
 }
 
 =item delete()
@@ -275,7 +274,7 @@ sub delete{
            $ref->{entity_id}, $ref->{location_id}, $ref->{location_class}
         ];
     }
-    __PACKAGE__->call_procedure(procname => $procname, args => $args );
+    __PACKAGE__->call_procedure(funcname => $procname, args => $args );
 }
 
 =back

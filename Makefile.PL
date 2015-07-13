@@ -15,6 +15,7 @@ perl_version '5.8.1';
 
 requires 'Data::Dumper';
 requires 'Carp::Always';
+requires 'TeX::Encode';
 requires 'Log::Log4perl';
 requires 'Locale::Maketext';
 requires 'DateTime';
@@ -33,13 +34,20 @@ requires 'Cwd';
 requires 'Config::IniFiles';
 requires 'MIME::Lite';
 requires 'Template' => '2.14';
-requires 'Error';
 requires 'CGI::Simple';
 requires 'File::MimeInfo';
 requires 'Number::Format';
 requires 'DateTime::Format::Strptime';
 requires 'Moose';
-
+requires 'namespace::autoclean';
+requires 'JSON';
+requires 'PGObject';
+requires 'PGObject::Simple';
+requires 'PGObject::Simple::Role';
+requires 'PGObject::Type::BigFloat';
+requires 'PGObject::Type::DateTime';
+requires 'PGObject::Util::DBMethod';
+requires 'App::LedgerSMB::Admin' => 0.04;
 
 recommends 'Math::BigInt::GMP';
 
@@ -50,6 +58,14 @@ test_requires 'Test::Exception';
 feature 'RESTful Web Services XML support',
     -default => 0,
     'XML::Simple' => 0;
+
+feature 'Standalone Server w/Starman',
+    -default => 0,
+    'Starman' => 0,
+    'CGI::Emulate::PSGI' => 0,
+    'Plack::Builder' => 0,
+    'Plack::Middleware::Static' => 0;
+  
 
 feature 'Size detection for images for embedding in LaTeX templates',
     -default => 0,

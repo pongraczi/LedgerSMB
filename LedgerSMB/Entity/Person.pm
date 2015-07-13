@@ -30,6 +30,7 @@ To get by control code:
 package LedgerSMB::Entity::Person;
 use Moose;
 extends 'LedgerSMB::Entity';
+use LedgerSMB::MooseTypes;
 
 use LedgerSMB::App_State;
 my $locale = $LedgerSMB::App_State::Locale;
@@ -60,7 +61,7 @@ Middle name of individual
 
 =cut
 
-has 'middle_name' => (is => 'rw', isa => 'Str', required => 0);
+has 'middle_name' => (is => 'rw', isa => 'Maybe[Str]', required => 0);
 
 =item last_name
 
@@ -112,11 +113,24 @@ sub salutations {
 
 Date when the  person was entered into LedgerSMB
 
-=back
-
 =cut
 
 has 'created' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+
+=item birthdate
+
+Date of birth.  Optional
+
+=item personal_id
+
+Personal id, such as a passport or other government-issued or other ID.
+
+=cut
+
+has 'birthdate' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
+has 'personal_id' => (is => 'ro', isa => 'Maybe[Str]');
+
+=back
 
 =head1 METHODS
 
@@ -130,7 +144,7 @@ This retrieves and returns the item as a blessed reference
 
 sub get {
     my ($self, $id) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'person__get',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'person__get',
                                           args => [$id]);
     return undef unless $ref->{control_code};
     return __PACKAGE__->new(%$ref);
@@ -145,7 +159,7 @@ person does not exist.
 
 sub get_by_cc {
     my ($self, $cc) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'person__get_by_cc',
+    my ($ref) = __PACKAGE__->call_procedure(funcname => 'person__get_by_cc',
                                           args => [$cc]);
     return undef unless $ref->{control_code};
     return __PACKAGE__->new(%$ref);
@@ -160,7 +174,7 @@ Saves the item and populates db defaults in id and created.
 
 sub save {
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'person__save'});
+    my ($ref) = $self->call_dbmethod(funcname => 'person__save');
     $self->entity_id(values %$ref);
 }
 

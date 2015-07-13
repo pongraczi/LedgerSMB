@@ -86,13 +86,16 @@ CREATE TABLE account (
   accno text primary key,
   description text,
   is_temp bool not null default false,
-  category CHAR(1) NOT NULL,
+  category CHAR(1) NOT NULL check (category IN ('A','L','Q','I','E')),
   gifi_accno text,
   heading int not null references account_heading(id),
   contra bool not null default false,
   tax bool not null default false,
   obsolete bool not null default false
 );
+
+COMMENT ON COLUMN account.category IS
+$$ A=asset,L=liability,Q=Equity,I=Income,E=expense $$;
 
 COMMENT ON COLUMN account.is_temp IS
 $$ Only affects equity accounts.  If set, close at end of year. $$;
@@ -168,8 +171,22 @@ CREATE TABLE account_link (
 );
 
 CREATE VIEW chart AS
-SELECT id, accno, description, 'H' as charttype, NULL as category, NULL as link, NULL as account_heading, null as gifi_accno, false as contra, false as tax from account_heading UNION
-select c.id, c.accno, c.description, 'A' as charttype, c.category, concat_colon(l.description) as link, heading, gifi_accno, contra, tax from account c left join account_link l ON (c.id = l.account_id) group by c.id, c.accno, c.description, c.category, c.heading, c.gifi_accno, c.contra, c.tax;
+SELECT id, accno, description,
+       'H' as charttype, NULL as category, NULL as link,
+       parent_id as account_heading,
+       null as gifi_accno, false as contra,
+       false as tax
+  from account_heading
+UNION
+select c.id, c.accno, c.description,
+       'A' as charttype, c.category, concat_colon(l.description) as link,
+       heading, gifi_accno, contra,
+       tax
+  from account c
+  left join account_link l
+    ON (c.id = l.account_id)
+group by c.id, c.accno, c.description, c.category, c.heading,
+         c.gifi_accno, c.contra, c.tax;
 
 GRANT SELECT ON chart TO public;
 
@@ -215,6 +232,7 @@ VALUES ('ar_EG', 'Arabic (Egypt)'),
        ('is',    'Icelandic'),
        ('it',    'Italian'),
        ('lt',    'Latvian'),
+       ('ms_MY','Malay'),
        ('nb',    'Norwegian'),
        ('nl',    'Dutch'),
        ('nl_BE', 'Dutch (Belgium)'),
@@ -655,13 +673,37 @@ COMMENT ON TABLE location_class is $$
 Individuals seeking to add new location classes should coordinate with others.
 $$;
 
+create table location_class_to_entity_class (
+  id serial unique,
+  location_class int not null references location_class(id),
+  entity_class int not null references entity_class(id)
+);
+
+GRANT SELECT ON location_class_to_entity_class TO PUBLIC;
+
+COMMENT ON TABLE location_class_to_entity_class IS
+$$This determines which location classes go with which entity classes$$;
+
 CREATE UNIQUE INDEX lower_class_unique ON location_class(lower(class));
 
 INSERT INTO location_class(id,class,authoritative) VALUES ('1','Billing',TRUE);
-INSERT INTO location_class(id,class,authoritative) VALUES ('2','Sales',TRUE);
-INSERT INTO location_class(id,class,authoritative) VALUES ('3','Shipping',TRUE);
+INSERT INTO location_class(id,class,authoritative) VALUES ('2','Sales',FALSE);
+INSERT INTO location_class(id,class,authoritative) VALUES ('3','Shipping',FALSE);
+INSERT INTO location_class(id,class,authoritative) VALUES ('4','Physical',TRUE);
+INSERT INTO location_class(id,class,authoritative) VALUES ('5','Mailing',FALSE);
 
-SELECT SETVAL('location_class_id_seq',4);
+SELECT SETVAL('location_class_id_seq',5);
+
+INSERT INTO location_class_to_entity_class 
+       (location_class, entity_class)
+SELECT lc.id, ec.id
+  FROM entity_class ec
+ cross
+  join location_class lc
+ WHERE ec.id <> 3 and lc.id < 4;
+
+INSERT INTO location_class_to_entity_class (location_class, entity_class)
+SELECT id, 3 from location_class lc where lc.id > 3;
   
 CREATE TABLE location (
   id serial PRIMARY KEY,
@@ -725,6 +767,8 @@ CREATE TABLE person (
     middle_name text,
     last_name text check (last_name ~ '[[:alnum:]_]') NOT NULL,
     created date not null default current_date,
+    birthdate date,
+    personal_id text,
     unique(entity_id) -- needed due to entity_employee assumptions --CT
  );
  
@@ -741,6 +785,7 @@ create table entity_employee (
     manager_id integer references entity(id),
     employeenumber varchar(32),
     dob date,
+    is_manager bool default false,
     PRIMARY KEY (entity_id)
 );
 
@@ -1404,7 +1449,7 @@ CREATE TABLE batch (
   approved_on date default null,
   approved_by int references entity_employee(entity_id),
   created_by int references entity_employee(entity_id),
-  locked_by int references session(session_id) ON DELETE CASCADE,
+  locked_by int references session(session_id) ON DELETE SET NULL,
   created_on date default now(),
   CHECK (length(control_code) > 0)
 );
@@ -1461,6 +1506,14 @@ payments in 1.3 are not full-fledged transactions.$$;
 COMMENT ON COLUMN acc_trans.source IS
 $$Document Source identifier for individual line items, usually used 
 for payments.$$;
+
+COMMENT ON COLUMN acc_trans.fx_transaction IS
+$$When 'f', indicates that the amount column states the amount in the currency
+as specified in the associated ar, ap, payment or gl record.
+
+When 't', indicates that the amount column states the difference between
+the foreighn currency amount and the base amount so that their sum equals the
+base amount.$$;
 
 CREATE INDEX acc_trans_voucher_id_idx ON acc_trans(voucher_id);
 
@@ -1524,13 +1577,36 @@ $$Hyperlink to product image.$$;
 CREATE UNIQUE INDEX parts_partnumber_index_u ON parts (partnumber) 
 WHERE obsolete is false;
 
+CREATE SEQUENCE lot_tracking_number;
+CREATE TABLE mfg_lot (
+    id serial not null unique,
+    lot_number text not null unique default nextval('lot_tracking_number')::text,
+    parts_id int not null references parts(id),
+    qty numeric not null,
+    stock_date date not null default now()::date
+);
+
+COMMENT ON TABLE mfg_lot IS 
+$$ This tracks assembly restocks.  This is designed to work with old code and
+may change as we refactor the parts.$$;
+    
+CREATE TABLE mfg_lot_item (
+    id serial not null unique,
+    mfg_lot_id int not null references mfg_lot(id),
+    parts_id int not null references parts(id),
+    qty numeric not null
+);
+
+COMMENT ON TABLE mfg_lot_item IS
+$$ This tracks items used in assembly restocking.$$;
+
 CREATE TABLE invoice (
   id serial PRIMARY KEY,
   trans_id int REFERENCES transactions(id),
   parts_id int REFERENCES parts(id),
   description text,
   qty NUMERIC,
-  allocated integer,
+  allocated NUMERIC,
   sellprice NUMERIC,
   precision int,
   fxsellprice NUMERIC,
@@ -1539,6 +1615,7 @@ CREATE TABLE invoice (
   unit varchar,
   deliverydate date,
   serialnumber text,
+  vendor_sku text,
   notes text
 );
 
@@ -1655,8 +1732,11 @@ CREATE TABLE ar (
   description text,
   is_return bool default false,
   crdate date,
-  unique(invnumber) -- probably a good idea as per Erik's request --CT
+  setting_sequence text,
+  check (invnumber is not null or not approved)
 );
+
+CREATE UNIQUE INDEX ar_invnumber_key ON ar(invnumber) where invnumber is not null;
 
 COMMENT ON TABLE ar IS
 $$ Summary/header information for AR transactions and sales invoices.
@@ -1742,6 +1822,7 @@ CREATE TABLE ap (
   description text,
   force_closed bool,
   crdate date,
+  is_return bool default false,
   entity_credit_account int references entity_credit_account(id) NOT NULL
 );
 
@@ -2018,20 +2099,26 @@ CREATE TABLE business_unit_jl (
 );
 
 CREATE TABLE business_unit_ac (
-  entry_id int references acc_trans(entry_id),
+  entry_id int references acc_trans(entry_id) on delete cascade,
   class_id int references business_unit_class(id),
   bu_id int,
   primary key(bu_id, class_id, entry_id),
   foreign key(class_id, bu_id) references business_unit(class_id, id)
 );
+-- The index is required for fast lookup when deleting acc_trans lines
+-- which happens when not-approved transactions are deleted
+CREATE INDEX business_unit_ac_entry_id_idx ON business_unit_ac(entry_id);
 
 CREATE TABLE business_unit_inv (
-  entry_id int references invoice(id),
+  entry_id int references invoice(id) on delete cascade,
   class_id int references business_unit_class(id),
   bu_id int,
   primary key(bu_id, class_id, entry_id),
   foreign key(class_id, bu_id) references business_unit(class_id, id)
 );
+-- The index is required for fast lookup when deleting invoices
+-- which happens when not-approved transactions are deleted
+CREATE INDEX business_unit_inv_entry_id_idx ON business_unit_inv(entry_id);
 
 CREATE TABLE business_unit_oitem (
   entry_id int references orderitems(id) on delete cascade,
@@ -2040,6 +2127,9 @@ CREATE TABLE business_unit_oitem (
   primary key(bu_id, class_id, entry_id),
   foreign key(class_id, bu_id) references business_unit(class_id, id)
 );
+-- The index is required for fast lookup when deleting order item lines
+-- which happens when not-approved transactions are deleted
+CREATE INDEX business_unit_oitem_entry_id_idx ON business_unit_oitem(entry_id);
 
 COMMENT ON TABLE business_unit IS
 $$ Tracks Projects, Departments, Funds, Etc.$$;
@@ -2135,7 +2225,7 @@ CREATE TABLE warehouse (
   description text
 );
 --
-CREATE TABLE inventory (
+CREATE TABLE warehouse_inventory (
   entity_id integer references entity_employee(entity_id),
   warehouse_id int,
   parts_id int,
@@ -2146,7 +2236,7 @@ CREATE TABLE inventory (
   entry_id SERIAL PRIMARY KEY
 );
 
-COMMENT ON TABLE inventory IS
+COMMENT ON TABLE warehouse_inventory IS
 $$ This table contains inventory mappings to warehouses, not general inventory
 management data.$$;
 --
@@ -2711,7 +2801,6 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 2	Add Transaction	1	1
 7	AR Aging	4	3
 39	Invoice Vouchers	250	2
-5	Search	1	7
 22	Add Transaction	21	1
 27	AP Aging	24	3
 25	Search	21	7
@@ -2751,17 +2840,6 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 107	Translations	98	5
 108	Description	107	1
 113	Balance Sheet	109	4
-117	Sales Invoices	116	1
-118	Sales Orders	116	2
-119	Checks	116	3
-120	Work Orders	116	4
-121	Quotations	116	5
-122	Packing Lists	116	6
-123	Pick Lists	116	7
-124	Purchase Orders	116	8
-125	Bin Lists	116	9
-126	RFQs	116	10
-127	Time Cards	116	11
 130	Taxes	128	2
 131	Defaults	128	3
 142	Add Warehouse	141	1
@@ -2772,46 +2850,15 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 152	List Languages	150	2
 154	Add SIC	153	1
 155	List SIC	153	2
-159	Invoice	156	3
-160	AR Transaction	156	4
-161	AP Transaction	156	5
-162	Packing List	156	6
-163	Pick List	156	7
-164	Sales Order	156	8
-165	Work Order	156	9
-166	Purchase Order	156	10
-167	Bin List	156	11
-168	Statement	156	12
-169	Quotation	156	13
-170	RFQ	156	14
-171	Timecard	156	15
-241	Letterhead	156	16
 173	Invoice	172	1
-174	AR Transaction	172	2
-175	AP Transaction	172	3
-176	Packing List	172	4
-177	Pick List	172	5
-178	Sales Order	172	6
-179	Work Order	172	7
-180	Purchase Order	172	8
-181	Bin List	172	9
-182	Statement	172	10
 205	Transaction Approval	0	6
 1	AR	0	2
 21	AP	0	4
 35	Cash	0	5
-183	Check	172	11
-184	Receipt	172	12
-185	Quotation	172	13
-186	RFQ	172	14
-187	Timecard	172	15
-242	Letterhead	172	16
 189	POS Invoice	188	1
 19	Contacts	0	1
 246	Import Chart	73	7
 136	GIFI	128	7
-4	Reports	1	9
-249	Vouchers	1	8
 24	Reports	21	9
 250	Vouchers	21	8
 200	Vouchers	35	5
@@ -2865,7 +2912,7 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 194	Credit Note	1	5
 195	Credit Invoice	1	6
 245	Import	73	2
-76	Reports	73	4
+76	Search and GL	73	4
 139	Add GIFI	136	4
 140	List GIFI	136	5
 247	Import GIFI	136	6
@@ -2889,7 +2936,6 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 192	New Window	0	24
 191	Preferences	0	23
 128	System	0	21
-116	Batch Printing	0	20
 9	Outstanding	4	1
 10	Outstanding	24	1
 81	Add Overhead	77	5
@@ -2904,6 +2950,42 @@ COPY menu_node (id, label, parent, "position") FROM stdin;
 18	Reverse Overpay	200	3
 26	Reverse AR Overpay	200	6
 59	Inventory	205	4
+75	Inventory and COGS	109	5
+159	Invoice	156	4
+160	AR Transaction	156	5
+161	AP Transaction	156	6
+162	Packing List	156	7
+163	Pick List	156	8
+164	Sales Order	156	9
+165	Work Order	156	10
+166	Purchase Order	156	11
+167	Bin List	156	12
+168	Statement	156	13
+169	Quotation	156	14
+170	RFQ	156	15
+171	Timecard	156	16
+241	Letterhead	156	17
+174	AR Transaction	172	3
+175	AP Transaction	172	4
+176	Packing List	172	5
+177	Pick List	172	6
+178	Sales Order	172	7
+179	Work Order	172	8
+180	Purchase Order	172	9
+181	Bin List	172	10
+182	Statement	172	11
+183	Check	172	12
+184	Receipt	172	13
+185	Quotation	172	14
+186	RFQ	172	15
+187	Timecard	172	16
+242	Letterhead	172	17
+90	Product Receipt	172	2
+99	Product Receipt	156	2
+129	Add Return	1	7
+5	Search	1	8
+4	Reports	1	10
+249	Vouchers	1	9
 \.
 
 
@@ -3003,7 +3085,7 @@ COPY menu_attribute (node_id, attribute, value, id) FROM stdin;
 44	report	1	110
 46	menu	1	111
 47	menu	1	112
-48	module	employee.pl	113
+48	module	contact.pl	113
 48	action	add	114
 50	menu	1	119
 51	module	oe.pl	120
@@ -3137,54 +3219,9 @@ COPY menu_attribute (node_id, attribute, value, id) FROM stdin;
 113	report_name	balance_sheet	283
 115	action	recurring_transactions	287
 115	module	am.pl	288
-116	menu	1	289
-119	module	bp.pl	290
-119	action	search	291
-119	type	check	292
-119	vc	vendor	293
-117	module	bp.pl	294
-117	action	search	295
-117	vc	customer	297
-118	module	bp.pl	298
-118	action	search	299
-118	vc	customer	300
-120	module	bp.pl	302
-120	action	search	303
-120	vc	customer	304
-121	module	bp.pl	306
-121	action	search	307
-121	vc	customer	308
-122	module	bp.pl	310
-122	action	search	311
-122	vc	customer	312
-120	type	work_order	305
-121	type	sales_quotation	309
-122	type	packing_list	313
-123	module	bp.pl	314
-123	action	search	315
-123	vc	customer	316
-123	type	pick_list	317
-124	module	bp.pl	318
-124	action	search	319
-124	vc	vendor	321
-124	type	purchase_order	320
-125	module	bp.pl	322
-125	action	search	323
-125	vc	vendor	325
-126	module	bp.pl	326
-126	action	search	327
-126	vc	vendor	329
-127	module	bp.pl	330
-127	action	search	331
-127	type	timecard	332
-125	type	bin_list	324
 76	module	reports.pl	180
 76	action	start_report	181
-117	type	invoice	296
-118	type	sales_order	301
 110	module	journal.pl	273
-126	type	request_quotation	328
-127	vc	employee	333
 128	menu	1	334
 130	module	am.pl	338
 130	taxes	audit_control	341
@@ -3558,8 +3595,21 @@ COPY menu_attribute (node_id, attribute, value, id) FROM stdin;
 59	action	start_report	217
 59	report_name	inventory_adj	218
 106	module	reports.pl	263
+75	module	reports.pl	219
+75	action	start_report	226
+75	report_name	cogs_lines	227
+90	module	template.pl	228
+90	action	display	229
+90	template_name	product_receipt	230
+90	format	tex	231
+99	module	template.pl	240
+99	action	display	241
+99	template_name	product_receipt	242
+99	format	html	245
+129	module	is.pl	251
+129	action	add	252
+129	type	customer_return	253
 \.
-
 
 --
 
@@ -4902,3 +4952,4 @@ CREATE UNIQUE INDEX template_name_idx_u ON template(template_name, format)
 WHERE language_code is null; -- Pseudo-Pkey
 
 commit;
+

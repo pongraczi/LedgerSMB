@@ -541,12 +541,6 @@ sub delete {
     }
     $sth->finish;
 
-    # delete inventory
-    $query = qq|DELETE FROM inventory WHERE trans_id = ?|;
-    $sth   = $dbh->prepare($query);
-    $sth->execute( $form->{id} ) || $form->dberror($query);
-    $sth->finish;
-
     # delete status entries
     $query = qq|DELETE FROM status WHERE trans_id = ?|;
     $sth   = $dbh->prepare($query);
@@ -584,7 +578,7 @@ sub delete {
     foreach $spoolfile (@spoolfiles) {
         unlink "${LedgerSMB::Sysconfig::spool}/$spoolfile" if $spoolfile;
     }
-
+    return 1;
 
 }
 
@@ -625,17 +619,18 @@ sub retrieve {
 				o.notes, o.intnotes, o.curr AS currency, 
 				pe.first_name \|\| ' ' \|\| pe.last_name AS employee,
 				o.person_id AS employee_id,
-				o.entity_credit_account, c.legal_name, 
+				o.entity_credit_account, vc.name as legal_name,
 				o.amount AS invtotal, o.closed, o.reqdate, 
 				o.quonumber, o.language_code,
-				o.ponumber, cr.entity_class
+				o.ponumber, cr.entity_class,
+				ns.location_id as locationid
 			FROM oe o
 			JOIN entity_credit_account cr ON (cr.id = o.entity_credit_account)
-			JOIN company c ON (cr.entity_id = c.entity_id)
-			JOIN entity vc ON (c.entity_id = vc.id)
+			JOIN entity vc ON (cr.entity_id = vc.id)
 			LEFT JOIN person pe ON (o.person_id = pe.id)
 			LEFT JOIN entity_employee e 
                                   ON (pe.entity_id = e.entity_id)
+                        LEFT JOIN new_shipto ns ON ns.oe_id = o.id
 			WHERE o.id = ?|;
         $sth = $dbh->prepare($query);
         $sth->execute( $form->{id} ) || $form->dberror($query);
@@ -657,7 +652,7 @@ sub retrieve {
         $sth->execute( $form->{id} ) || $form->dberror($query);
 
         $ref = $sth->fetchrow_hashref('NAME_lc');
-        for ( keys %$ref ) { $form->{$_} = $ref->{$_} }
+        for ( keys %$ref ) { $form->{$_} = $ref->{$_} unless ( $_ eq "id") }
         $sth->finish;
 
         # get printed, emailed and queued
@@ -681,7 +676,11 @@ sub retrieve {
 
         # retrieve individual items
         $query = qq|
-			SELECT o.id AS orderitems_id, p.partnumber, p.assembly, 
+			SELECT o.id AS orderitems_id, 
+                                COALESCE(CASE WHEN pv.partnumber <> ''
+                                              THEN pv.partnumber ELSE null 
+                                          END, p.partnumber) AS partnumber, 
+                                p.assembly, 
 				o.description, o.qty, o.sellprice, o.precision, 
 				o.parts_id AS id, o.unit, o.discount, p.bin,
 				o.reqdate, o.ship, o.serialnumber,
@@ -694,13 +693,17 @@ sub retrieve {
 			FROM orderitems o
 			JOIN parts p ON (o.parts_id = p.id)
 			LEFT JOIN partsgroup pg ON (p.partsgroup_id = pg.id)
+			LEFT JOIN partsvendor pv ON (pv.parts_id = p.id
+                                           AND pv.credit_id = ?)
 			LEFT JOIN translation t 
 				ON (t.trans_id = p.partsgroup_id 
 					AND t.language_code = ?)
 			WHERE o.trans_id = ?
 			ORDER BY o.id|;
         $sth = $dbh->prepare($query);
-        $sth->execute( $form->{language_code}, $form->{id} )
+        # The use of vendor_id below helps ensure that partsvendor drops out
+        # for sales orders. --CT
+        $sth->execute( $form->{vendor_id}, $form->{language_code}, $form->{id} )
           || $form->dberror($query);
 
         # foreign exchange rates
@@ -992,7 +995,7 @@ sub order_details {
 
         # run query to check for inventory
         $query = qq|
-			SELECT sum(qty) AS qty FROM inventory
+			SELECT sum(qty) AS qty FROM warehouse_inventory
 			WHERE parts_id = ? AND warehouse_id = ?|;
         $sth = $dbh->prepare($query) || $form->dberror($query);
 
@@ -1190,7 +1193,7 @@ sub order_details {
               Tax::calculate_taxes( \@taxaccounts, $form, $linetotal, 1 );
             $taxbase = Tax::extract_taxes( \@taxaccounts, $form, $linetotal );
             foreach $item (@taxaccounts) {
-                push @taxrates, Math::BigFloat->new(100) * $item->rate;
+                push @taxrates, LedgerSMB::PGNumber->new(100) * $item->rate;
                 if ( $form->{taxincluded} ) {
                     $taxaccounts{ $item->account } += $item->value;
                     $taxbase{ $item->account }     += $taxbase;
@@ -1646,7 +1649,7 @@ sub save_inventory {
 
     $query = qq|
 		SELECT sum(qty)
-		FROM inventory
+		FROM warehouse_inventory
 		WHERE parts_id = ?
 		AND warehouse_id = ?|;
     $wth = $dbh->prepare($query) || $form->dberror($query);
@@ -1682,7 +1685,7 @@ sub save_inventory {
 
             $ship *= $ml;
             $query = qq|
-				INSERT INTO inventory 
+				INSERT INTO warehouse_inventory 
 					(parts_id, warehouse_id, qty, trans_id, 
 					orderitems_id, shippingdate, 
 					entity_id)
@@ -1745,6 +1748,7 @@ sub save_inventory {
 
         }
     }
+    1;
 
 }
 
@@ -1811,13 +1815,10 @@ sub adj_inventory {
 
     my $id = $dbh->quote( $form->{id} );
     $query = qq|
-		SELECT qty,
-			(SELECT SUM(qty) FROM inventory
-			WHERE trans_id = $id
-			AND orderitems_id = ?) AS total
-		FROM inventory
-		WHERE trans_id = $id
-		AND orderitems_id = ?|;
+                SELECT sum(case when orderitems_id = ? then qty else 0 end) as
+                       qty, sum(qty) as total
+		FROM warehouse_inventory
+		WHERE trans_id = $id|;
     my $ith = $dbh->prepare($query) || $form->dberror($query);
 
     my $qty;
@@ -1825,7 +1826,7 @@ sub adj_inventory {
 
     while ( my $ref = $sth->fetchrow_hashref(NAME_lc) ) {
 
-        $ith->execute( $ref->{id}, $ref->{id} ) || $form->dberror($query);
+        $ith->execute( $ref->{id} ) || $form->dberror($query);
 
         my $ship = $ref->{ship};
         while ( my $inv = $ith->fetchrow_hashref(NAME_lc) ) {
@@ -1849,7 +1850,7 @@ sub adj_inventory {
 
     # delete inventory entries if qty = 0
     $query = qq|
-		DELETE FROM inventory
+		DELETE FROM warehouse_inventory
 		WHERE trans_id = ?
 		AND qty = 0|;
     $sth = $dbh->prepare($query);
@@ -1912,7 +1913,7 @@ sub get_inventory {
 				sum(i.qty) * 2 AS onhand, sum(i.qty) AS qty,
 				pg.partsgroup, w.description AS warehouse, 
 				i.warehouse_id
-			FROM inventory i
+			FROM warehouse_inventory i
 			JOIN parts p ON (p.id = i.parts_id)
 			LEFT JOIN partsgroup pg ON (p.partsgroup_id = pg.id)
 			LEFT JOIN warehouse w ON (w.id = i.warehouse_id)
@@ -1929,7 +1930,7 @@ sub get_inventory {
 				SELECT p.id, p.partnumber, p.description,
 					p.onhand, 
 						(SELECT SUM(qty) 
-						FROM inventory i 
+						FROM warehouse_inventory i 
 						WHERE i.parts_id = p.id) AS qty,
 					pg.partsgroup, '' AS warehouse, 
 					0 AS warehouse_id
@@ -1946,7 +1947,7 @@ sub get_inventory {
 				sum(i.qty) * 2 AS onhand, sum(i.qty) AS qty,
 				pg.partsgroup, w.description AS warehouse, 
 				i.warehouse_id
-			FROM inventory i
+			FROM warehouse_inventory i
 			JOIN parts p ON (p.id = i.parts_id)
 			LEFT JOIN partsgroup pg ON (p.partsgroup_id = pg.id)
 			LEFT JOIN warehouse w ON (w.id = i.warehouse_id)
@@ -1986,7 +1987,7 @@ sub transfer {
     my %total = ();
 
     my $query = qq|
-		INSERT INTO inventory
+		INSERT INTO warehouse_inventory
 			(warehouse_id, parts_id, qty, shippingdate, entity_id)
 		VALUES (?, ?, ?, ?, ?)|;
     $sth = $dbh->prepare($query) || $form->dberror($query);
@@ -2315,5 +2316,9 @@ sub generate_orders {
     }
 
 }
+
+=back
+
+=cut
 
 1;

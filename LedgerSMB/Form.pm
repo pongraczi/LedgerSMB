@@ -79,6 +79,9 @@ package Form;
 use base qw(LedgerSMB::Request);
 use utf8;
 
+use Data::Dumper;
+
+
 our $logger = Log::Log4perl->get_logger('LedgerSMB::Form');
 
 # To be later set in config, but also hardwired in Template::HTML --CT
@@ -422,37 +425,26 @@ sub error {
 sub _error {
 
     my ( $self, $msg ) = @_;
-
+    my $error;
+    if (eval { $msg->isa('LedgerSMB::Request::Error') }){
+        $error = $msg;
+    } else {
+        $error = LedgerSMB::Request::Error->new(msg => "$msg");
+    }
+    
     if ( $ENV{GATEWAY_INTERFACE} ) {
 
-        $self->{msg}    = $msg;
-        $self->{format} = "html";
-        $self->format_string('msg');
-
         delete $self->{pre};
-
-        if ( !$self->{header} ) {
-            $self->header;
-        }
-        $logger->error($msg);
-        $logger->error("dbversion: $self->{dbversion}, company: $self->{company}");
-
-        print
-          qq|<body><h2 class="error">Error!</h2> <p><b>$self->{msg}</b>
-             <p>dbversion: $self->{dbversion}, company: $self->{company}</p>
-             </body>|;
-
-        $self->finalize_request();
+        print $error->http_response("<p>dbversion: $self->{dbversion}, company: $self->{company}</p>");
 
     }
     else {
 
         if ( $ENV{error_function} ) {
-            __PACKAGE__->can($ENV{error_function})->($msg);
+            &{ $ENV{error_function} }($msg);
         }
-        die "Error: $msg\n";
+        $error->throw;
     }
-    die;
 }
 
 =item $form->finalize_request();
@@ -579,9 +571,12 @@ sub header {
 
     return if $self->{header} or $ENV{LSMB_NOHEAD};
     my $cache = 1; # default
-    if ($LedgerSMB::App_State::DBH){
+    if ($self->{_error}){
+        $cache = 0;
+    }
+    elsif ($LedgerSMB::App_State::DBH){
         # we have a db connection, so are logged in.  Let's see about caching.
-        $cache = 0 if LedgerSMB::Setting->get('disable_back');
+        $cache = 0 if eval { LedgerSMB::Setting->get('disable_back')};
     }
 
     $ENV{LSMB_NOHEAD} = 1; # Only run once.
@@ -611,7 +606,7 @@ qq|<meta http-equiv="content-type" content="text/html; charset=$self->{charset}"
 		window.alert('Warning:  Your password will expire in $self->{pw_expires}');
 	</script>|;
         }
-        my $dformat = $self->{_myconfig}->{dateformat};
+        my $dformat = $LedgerSMB::App_State::User->{dateformat};
 
         print qq|Content-Type: text/html; charset=utf-8\n\n
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" 
@@ -640,7 +635,7 @@ qq|<meta http-equiv="content-type" content="text/html; charset=$self->{charset}"
            var lsmbConfig = {dateformat: '$dformat'};
         </script>
        <script type="text/javascript" language="JavaScript" src="UI/lib/dojo/dojo/dojo.js"></script>
-        <script type="text/javascript" language="JavaScript" src="UI/lib/setup.js"></script>
+        <script type="text/javascript" language="JavaScript" src="UI/lib/main.js"></script>
 	<meta name="robots" content="noindex,nofollow" />
         $headeradd
 </head>
@@ -880,11 +875,13 @@ sub format_amount {
     $amount = "" unless defined $amount;
     $places = "0" unless defined $places;
     $dash = "" unless defined $dash;
+    $amount = $self->parse_amount($myconfig, $amount);
     if ($self->{money_precision}){
        $places= $self->{money_precision};
     }
     $myconfig->{numberformat} = '1000.00' unless $myconfig->{numberformat};
-    $amount = $self->parse_amount( $myconfig, $amount );
+    $amount = $self->parse_amount( $myconfig, $amount )
+        unless ref($amount) eq 'LedgerSMB::PGNumber';
     return $amount->to_output({
                places => $places,
                 money => $self->{money_precision},
@@ -895,7 +892,7 @@ sub format_amount {
 
 =item $form->parse_amount($myconfig, $amount);
 
-Return a Math::BigFloat containing the value of $amount where $amount is
+Return a LedgerSMB::PGNumber containing the value of $amount where $amount is
 formatted as $myconfig->{numberformat}.  If $amount is '' or undefined, it is
 treated as zero.  DRCR and parenthesis notation is accepted in addition to
 negative sign notation.
@@ -907,8 +904,8 @@ Calls $form->error if the value is NaN.
 sub parse_amount {
 
     my ( $self, $myconfig, $amount ) = @_;
+    return $amount if eval {$amount->isa('LedgerSMB::PGNumber') };
 
-    #if ( ( $amount eq '' ) or ( ! defined $amount ) ) {
     if ( ( ! defined $amount ) or ( $amount eq '' ) ) {
         $amount = '0';
     }
@@ -930,16 +927,16 @@ sub round_amount {
 
     # These rounding rules follow from the previous implementation.
     # They should be changed to allow different rules for different accounts.
-    Math::BigFloat->round_mode('+inf') if $amount >= 0;
-    Math::BigFloat->round_mode('-inf') if $amount < 0;
+    LedgerSMB::PGNumber->round_mode('+inf') if $amount >= 0;
+    LedgerSMB::PGNumber->round_mode('-inf') if $amount < 0;
 
-    $amount = Math::BigFloat->new($amount)->ffround( -$places ) if $places >= 0;
-    $amount = Math::BigFloat->new($amount)->ffround( -( $places - 1 ) )
+    $amount = LedgerSMB::PGNumber->new($amount)->ffround( -$places ) if $places >= 0;
+    $amount = LedgerSMB::PGNumber->new($amount)->ffround( -( $places - 1 ) )
       if $places < 0;
 
     $amount->precision(undef); #we are assuming whole cents so do not round
                                #immediately on arithmatic.  This is necessary
-                               #because Math::BigFloat is arithmatically
+                               #because LedgerSMB::PGNumber is arithmatically
                                #correct wrt accuracy and precision.
 
     return $amount;
@@ -948,7 +945,7 @@ sub round_amount {
 =item $form->db_parse_numeric('sth' => $sth, ['arrayref' => $arrayref, 'hashref' => $hashref])
 
 Converts numeric values in the result set $arrayref or $hashref to
-Math::BigFloat using $sth to determine which fields are numeric.
+LedgerSMB::PGNumber using $sth to determine which fields are numeric.
 
 =cut
 
@@ -964,9 +961,9 @@ sub db_parse_numeric {
         if ($types[$_] == 3 or $types[$_] ==2) {
             $arrayref->[$_] ||= 0 if defined $arrayref;
             $hashref->{$names[$_]} ||=0 if defined $hashref;
-            $arrayref->[$_] = Math::BigFloat->new($arrayref->[$_]) 
+            $arrayref->[$_] = LedgerSMB::PGNumber->new($arrayref->[$_]) 
               if defined $arrayref;
-            $hashref->{$names[$_]} = Math::BigFloat->new($hashref->{$names[$_]})
+            $hashref->{$names[$_]} = LedgerSMB::PGNumber->new($hashref->{$names[$_]})
               if defined $hashref;
         }
 
@@ -1202,9 +1199,183 @@ sub print_button {
     my ( $self, $button, $name ) = @_;
 
     print
-qq|<button class="submit" type="submit" name="action" value="$name" accesskey="$button->{$name}{key}" title="$button->{$name}{value} [Alt-$button->{$name}{key}]">$button->{$name}{value}</button>\n|;
+qq|<button data-dojo-type="dijit/form/Button" class="submit" type="submit" name="action" value="$name" accesskey="$button->{$name}{key}" title="$button->{$name}{value} [Alt-$button->{$name}{key}]">$button->{$name}{value}</button>\n|;
 }
 
+
+=item $form->generate_selects(\%myconfig);
+
+=cut
+
+sub generate_selects {
+	 my ($form, $myconfig) = @_;
+
+
+    # currencies
+	 if (!$form->{currencies}) {
+		  $form->{currencies} = $form->get_setting('curr');
+	 }
+	 if ($form->{currencies}) {
+		  my %curr;
+		  my @curr = split( /:/, $form->{currencies} );
+		  $form->{defaultcurrency} = $curr[0];
+		  foreach (@curr) {
+				$curr{$_} = 1;
+		  }
+		  my @curr = keys %curr; 
+ 
+		  $form->{currency} = $form->{defaultcurrency}
+		       unless $form->{currency};	 
+		  $form->{selectcurrency} = "";
+		  for (@curr) {
+				my $selected =
+					 ($form->{currency} eq $_)
+					 ? " selected=\"selected\"" : "";
+				$form->{selectcurrency} .=
+					 "<option value=\"$_\"$selected>$_</option>\n"
+		  }
+	 }
+
+	 # partsgroups
+    if ( $form->{all_partsgroup} && @{ $form->{all_partsgroup} } ) {
+        $form->{selectpartsgroup} = "<option></option>\n";
+		  $form->{selectpartsgroup} = "";
+        foreach my $ref ( @{ $form->{all_partsgroup} } ) {
+				my $value = "$ref->{partsgroup}--$ref->{id}";
+				my $selected = ($form->{partsgroup} eq $value) ?
+					 ' selected="selected"' : "";
+            if ( $ref->{translation} ) {
+                $form->{selectpartsgroup} .=
+						  qq|<option value="$value"$selected>$ref->{translation}</option>\n|;
+            }
+            else {
+                $form->{selectpartsgroup} .=
+						  qq|<option value="$value"$selected>$ref->{partsgroup}</option>\n|;
+            }
+        }
+    }
+
+	 # projects
+    if ( $form->{all_project} && @{ $form->{all_project} } ) {
+        $form->{selectprojectnumber} = "<option></option>\n";
+		  $form->{selectprojectnumber} = "";
+        for ( @{ $form->{all_project} } ) {
+				my $value = "$_->{projectnumber}--$_->{id}";
+            $form->{selectprojectnumber} .=
+					 # change the format here, then change it below!
+					 qq|<option value="$value">$_->{projectnumber}</option>\n|;
+        }
+		  if ($form->{rowcount}) {
+				for my $i ( 1 .. $form->{rowcount} ) {
+					 $form->{"selectprojectnumber_$i"} = 
+						  $form->{"selectprojectnumber"};
+					 $form->{"selectprojectnumber_$i"} =~
+						  s/(value="\Q$form->{"projectnumber_$i"}\E")/$1 selected="selected"/;
+				}
+		  }
+    }
+
+    # departments
+    if ( $form->{all_department} && @{ $form->{all_department} } ) {
+        $form->{selectdepartment} = "<option></option>\n";
+        for ( @{ $form->{all_department} } ) {
+				my $value = "$_->{description}--$_->{id}";
+				my $selected = ($form->{department} eq $value) ?
+					 ' selected="selected"' : "";
+            $form->{selectdepartment} .=
+					 qq|<option value="$value"$selected>$_->{description}</option>\n|;
+        }
+    }
+
+	 # languages
+    if ( $form->{all_language} && @{ $form->{all_language} } ) {
+        $form->{selectlanguage} = "<option></option>\n";
+        for ( @{ $form->{all_language} } ) {
+				my $value = $_->{code};
+				my $selected = ($form->{language} eq $value) ?
+					 ' selected="selected"' : "";
+            $form->{selectlanguage} .=
+              qq|<option value="$value"$selected>$_->{description}</option>\n|;
+        }
+    }
+
+    # sales staff
+    if ( $form->{all_employees} && @{ $form->{all_employee} } ) {
+        $form->{selectemployee} = "";
+        for ( @{ $form->{all_employee} } ) {
+            $form->{selectemployee} .=
+              qq|<option value="$_->{name}--$_->{id}">$_->{name}</option>\n|;
+        }
+    }
+
+    # customers/vendors
+	 if ($form->{vc}) {
+		  if ( $form->{"all_$form->{vc}"} && @{ $form->{"all_$form->{vc}"} } ) {
+				$form->{"select$form->{vc}"} = "";
+				for ( @{ $form->{"all_$form->{vc}"} } ) {
+					 my $value = "$_->{name}--$_->{id}";
+					 my $selected = ($form->{$form->{vc}} eq $value) ?
+						  ' selected="selected"' : "";
+					 $form->{"select$form->{vc}"} .=
+						  qq|<option value="$value"$selected>$_->{name}</option>\n|;
+				}
+		  }
+	 }
+
+	 # AR/AP links
+	 # AR_amount_*, AP_amount_*, 
+	 if (defined $form->{ARAP}) {
+		  $form->create_links( module => $form->{ARAP},
+									  myconfig => $myconfig,
+									  vc => $form->{vc},
+									  billing => $form->{vc} eq 'customer'
+									  && $form->{type} eq 'invoice')
+				unless defined $form->{"$form->{ARAP}_links"};
+
+		  foreach my $key ( keys %{ $form->{"$form->{ARAP}_links"} } ) {
+
+				$form->{"select$key"} = "";
+				foreach my $ref ( @{ $form->{"$form->{ARAP}_links"}{$key} } ) {
+					 my $value = "$ref->{accno}--$ref->{description}";
+					 $form->{"select$key"} .=
+						  # change the format here, then change it below too!
+						  qq|<option value="$value">$value</option>\n|;
+				}
+		  }
+
+		  if ($form->{rowcount}) {
+				for my $i ( 1 .. $form->{rowcount} ) {
+					 $form->{"select$form->{ARAP}_amount_$i"} = 
+						  $form->{"select$form->{ARAP}_amount"};
+					 $form->{"select$form->{ARAP}_amount_$i"} =~
+						  s/(value="\Q$form->{"$form->{ARAP}_amount_$i"}\E")/$1 selected="selected"/;
+				}
+		  }
+	 }
+
+	 # formats
+    $form->{selectformat} = qq|<option value="html">html<option value="csv">csv\n|;
+    if ( ${LedgerSMB::Sysconfig::latex} ) {
+        $form->{selectformat} .= qq|
+            <option value="postscript">|
+				. $LedgerSMB::App_State::Locale->text('Postscript')
+				. qq|<option value="pdf">|
+				. $LedgerSMB::App_State::Locale->text('PDF');
+    }
+
+    # warehouse
+    if ( $form->{all_warehouse} &&  @{ $form->{all_warehouse} } ) {
+        $form->{selectwarehouse} = "<option></option>\n";
+        for ( @{ $form->{all_warehouse} } ) {
+				my $value = "$_->{description}--$_->{id}";
+				my $selected = ($form->{warehouse} eq $value) ?
+					 ' selected="selected"' : "";
+            $form->{selectwarehouse} .=
+					 qq|<option value="$value"$selected>$_->{description}\n|;
+        }
+    }
+
+}
 
 =item test_should_get_images
 
@@ -1253,7 +1424,7 @@ sub db_init {
 
     $self->{db_dateformat} = $myconfig->{dateformat};    #shim
 
-    LedgerSMB::DBH->require_version($self->{version});
+    LedgerSMB::DBH->require_version($self->{version}) if $self->{version};
 
     my $query = "SELECT t.extends, 
 			coalesce (t.table_name, 'custom_' || extends) 
@@ -1325,6 +1496,9 @@ Valid values for $query_type are any casing of 'SELECT', 'INSERT', and 'UPDATE'.
 
 sub run_custom_queries {
     my ( $self, $tablename, $query_type, $linenum ) = @_;
+    return unless exists $self->{custom_db_fields} 
+           and ref $self->{custom_db_fields}
+           and exists $self->{custom_db_fields}->{$tablename};
     my $dbh = $self->{dbh};
     if ( $query_type !~ /^(select|insert|update)$/i ) {
         $self->error(
@@ -1344,7 +1518,7 @@ sub run_custom_queries {
     }
 
     $query_type = uc($query_type);
-    for ( @{ $self->{custom_db_fields}{$tablename} } ) {
+    for ( @{ $self->{custom_db_fields}->{$tablename} } ) {
         @elements = split( /:/, $_ );
         push @{ $temphash{ $elements[0] } }, $elements[1];
     }
@@ -1593,7 +1767,7 @@ sub get_exchangerate {
         $sth->execute( $curr, $transdate );
 
         ($exchangerate) = $sth->fetchrow_array;
-	$exchangerate = Math::BigFloat->new($exchangerate);
+	$exchangerate = LedgerSMB::PGNumber->new($exchangerate);
         $sth->finish;
     }
 
@@ -1788,7 +1962,10 @@ sub get_name {
 
     # Vendor and Customer are now views into entity_credit_account.
     my $query = qq/
-		SELECT c.*, ecl.*, e.name, e.control_code, ctf.default_reportable
+		SELECT c.*, coalesce(ecl.address, el.address) as address,
+                       coalesce(ecl.city, el.city) as city, 
+                       e.name, e.control_code, 
+                       ctf.default_reportable
                   FROM entity_credit_account c
 		  JOIN entity e ON (c.entity_id = e.id)
              LEFT JOIN (SELECT coalesce(line_one, '')
@@ -1798,6 +1975,13 @@ sub get_name {
                           JOIN location l ON etl.location_id = l.id
                           WHERE etl.location_class = 1) ecl
                         ON (c.id = ecl.credit_id)
+             LEFT JOIN (SELECT coalesce(line_one, '')
+                               || ' ' || coalesce(line_two, '') as address,
+                               l.city, etl.entity_id
+                          FROM entity_to_location etl
+                          JOIN location l ON etl.location_id = l.id
+                          WHERE etl.location_class = 1) el
+                        ON (c.entity_id = el.entity_id)
              LEFT JOIN country_tax_form ctf ON (c.taxform_id = ctf.id)
 		 WHERE (lower(e.name) LIKE ?
 		       OR c.meta_number ILIKE ?
@@ -1818,7 +2002,6 @@ sub get_name {
         $i++;
     }
     $sth->finish;
-    use Carp::Always;
 
     return $i;
 }
@@ -1977,6 +2160,7 @@ $module and $dbh are unused.
 sub get_regular_metadata {
     my ( $self, $myconfig, $vc, $module, $dbh, $transdate, $job ) = @_;
     $dbh = $self->{dbh};
+    $transdate = $transdate->to_db if eval { $transdate->can('to_db') };
 
     $self->all_employees( $myconfig, $dbh, $transdate, 1 );
     $self->all_business_units( $myconfig, $dbh, $transdate, $job );
@@ -2131,7 +2315,6 @@ sub all_business_units {
     );
 
     while (my $classref = $class_sth->fetchrow_hashref('NAME_lc')){
-        warn $classref->{id};
         push @{$self->{bu_class}}, $classref;
         $bu_sth->execute($classref->{id}, $transdate, $credit_id);
         $self->{b_units}->{$classref->{id}} = [];
@@ -2280,12 +2463,19 @@ sub create_links {
     my $val;
     my $ref;
     my $key;
+    my %tax_accounts;
+
+    $sth = $dbh->prepare("SELECT accno FROM account WHERE tax");
+    $sth->execute();
+    while ( my $ref = $sth->fetchrow_hashref('NAME_lc') ) {
+        $tax_accounts{$ref->{accno}} = 1;
+    }
 
     # now get the account numbers
     $query = qq|SELECT a.accno, a.description, a.link
 				  FROM chart a
                   JOIN account ON a.id = account.id AND NOT account.obsolete
-				 WHERE link LIKE ?
+				 WHERE (link LIKE ?) OR account.tax
 			  ORDER BY accno|;
 
     $sth = $dbh->prepare($query);
@@ -2294,8 +2484,12 @@ sub create_links {
     $self->{accounts} = "";
 
     while ( my $ref = $sth->fetchrow_hashref('NAME_lc') ) {
+        my $link = $ref->{link};
 
-        foreach my $key ( split /:/, $ref->{link} ) {
+        $link .= ($link ? ":" : "") . "${module}_tax"
+            if $tax_accounts{$ref->{accno}};
+
+        foreach my $key ( split /:/, $link ) {
 
             if ( $key =~ /$module/ ) {
 
@@ -2318,6 +2512,8 @@ sub create_links {
 
     my $arap = ( $vc eq 'customer' ) ? 'ar' : 'ap';
     $vc = 'vendor' unless $vc eq 'customer';
+    my $seq = ( $vc eq 'customer' ) ? 'a.setting_sequence' 
+                                    : 'NULL as setting_sequence';
 
     if ( $self->{id} ) {
 
@@ -2331,7 +2527,8 @@ sub create_links {
 				a.person_id, e.name AS employee, 
 				c.language_code, a.ponumber, a.reverse,
                                 a.approved, ctf.default_reportable, 
-                                a.description, a.on_hold, a.crdate
+                                a.description, a.on_hold, a.crdate, 
+                                ns.location_id as locationid, a.is_return, $seq
 			FROM $arap a
 			JOIN entity_credit_account c 
 				ON (a.entity_credit_account = c.id)
@@ -2341,6 +2538,7 @@ sub create_links {
 			LEFT JOIN entity e ON (er.entity_id = e.id)
                         LEFT JOIN country_tax_form ctf 
                                   ON (ctf.id = c.taxform_id)
+                        LEFT JOIN new_shipto ns on a.id = ns.trans_id
 			WHERE a.id = ? AND c.entity_class = 
 				(select id FROM entity_class 
 				WHERE class ilike ?)|;
@@ -2594,15 +2792,21 @@ sub current_date {
     $days *= 1;
     if ($thisdate) {
 
-        my $dateformat = $myconfig->{dateformat};
+        my $dateformat;
 
-        if ( $myconfig->{dateformat} !~ /^y/ ) {
-            my @a = split /\D/, $thisdate;
-            $dateformat .= "yy" if ( length $a[2] > 2 );
-        }
+        if ($thisdate =~ /\d\d\d\d-\d\d-\d\d/) {
+            $dateformat = 'yyyy-mm-dd';
 
-        if ( $thisdate !~ /\D/ ) {
-            $dateformat = 'yyyymmdd';
+        } else {
+            $dateformat = $myconfig->{dateformat};
+            if ( $myconfig->{dateformat} !~ /^y/ ) {
+                my @a = split /\D/, $thisdate;
+                $dateformat .= "yy" if ( length $a[2] > 2 );
+            }
+
+            if ( $thisdate !~ /\D/ ) {
+                $dateformat = 'yyyymmdd';
+            }
         }
 
         $query = qq|SELECT (to_date(?, ?) 
@@ -3381,6 +3585,10 @@ This should be used instead of direct tests, and checks for a sequence selected.
 
 sub should_update_defaults {
     my ($self, $fldname) = @_;
+
+    my $gapless_ar = LedgerSMB::Setting->get('gapless_ar');
+    return 0 if $gapless_ar and ($fldname eq 'invnumber');
+
     if (!$self->{$fldname}){
        return 1;
     }
@@ -3391,6 +3599,29 @@ sub should_update_defaults {
     my $sequence = LedgerSMB::Setting::Sequence->get($self->{setting_sequence});
     return 1 unless $sequence->accept_input;
     return 0;
+}
+
+=item $form->update_invnumber
+
+If invnumber is not set, updates it.  Used when gapless numbering is in effect
+
+=cut
+
+sub update_invnumber {
+    my $self = shift;
+    my $sth = $LedgerSMB::App_State::DBH->prepare(
+        'select invnumber from ar where id = ?'
+    );
+    $sth->execute($self->{id});
+    my ($invnumber) = $sth->fetchrow_array;
+    return if defined $invnumber or !$sth->rows;
+    $sth->finish;
+    $sth = $LedgerSMB::App_State::DBH->prepare(
+      'update ar set invnumber = ? where id = ?'
+    );
+    $sth->execute($self->update_defaults(
+                          $LedgerSMB::App_State::User, 'sinumber'
+                                        ), $self->{id});    
 }
 
 =item $form->db_prepare_vars(var1, var2, ..., varI<n>)
@@ -3691,7 +3922,7 @@ key.  It is not generally to be used with code on new templates.
 
 sub sequence_dropdown{
     my ($self, $setting_key) = @_;
-    return undef if $self->{id};
+    return undef if $self->{id} and ($setting_key ne 'sinumber');
     my @sequences = LedgerSMB::Setting::Sequence->list($setting_key);
     my $retval = qq|<select name='setting_sequence' class='sequence'>\n|;
     $retval .= qq|<option></option>|;

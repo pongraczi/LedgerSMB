@@ -41,15 +41,20 @@ Displays a template for review
 
 sub display {
     my ($request) = @_;
-    my $dbtemp = LedgerSMB::Template::DB->get(%$request);
+    my $dbtemp;
+    eval {$dbtemp = LedgerSMB::Template::DB->get(%$request)};
     $dbtemp->{content} = $dbtemp->template if defined $dbtemp;
+    $dbtemp = $request unless $dbtemp->{format};
+    $dbtemp->{languages} = 
+        [ LedgerSMB->call_procedure(funcname => 'person__list_languages') ];
     LedgerSMB::Template->new(
         user     => $request->{_user},
         locale   => $request->{_locale},
         path     => 'UI/templates',
         template => 'preview',
         format   => 'HTML'
-    )->render($dbtemp);
+    )->render({ request => $request,
+                template => $dbtemp });
 }
 
 =head2 edit($request)
@@ -60,15 +65,23 @@ Displays a screen for editing the template
 
 sub edit {
     my ($request) = @_;
-    my $dbtemp = LedgerSMB::Template::DB->get(%$request);
+    my $dbtemp = eval { LedgerSMB::Template::DB->get(%$request) } ;
+    delete $request->{language_code} unless $dbtemp;
+    $dbtemp = eval { LedgerSMB::Template::DB->get(%$request) } unless $dbtemp;
+    die $LedgerSMB::App_State::Locale->text('Template Not Found') unless $dbtemp;
     $dbtemp->{content} = $dbtemp->template;
+    $dbtemp = $request unless $dbtemp->{format};
+    $dbtemp->{languages} = 
+        [ LedgerSMB->call_procedure(funcname => 'person__list_languages') ];
+
     LedgerSMB::Template->new(
         user     => $request->{_user},
         locale   => $request->{_locale},
         path     => 'UI/templates',
         template => 'edit',
         format   => 'HTML'
-    )->render($dbtemp);
+    )->render({ request => $script,
+                template => $dbtemp });
 }
 
 =head2 save($request)
@@ -99,7 +112,9 @@ sub upload {
     my $fdata = join ("", <$fh>);
     die "No content" unless $fdata;
     my $testname = $request->{template_name} . "." . $request->{format};
-    die 'Unexpected file name'
+    die LedgerSMB::App_State::Locale->text(
+                'Unexpected file name, expected [_1], got [_2]',
+                 $testname, $name)
           unless $name eq $testname;
     $request->{template} = $fdata;
     my $dbtemp = LedgerSMB::Template::DB->new(%$request);

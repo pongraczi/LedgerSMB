@@ -41,6 +41,7 @@ package IC;
 
 use Log::Log4perl;
 use LedgerSMB::File;
+use Try::Tiny;
 
 my $logger = Log::Log4perl->get_logger('IC');
 
@@ -133,7 +134,7 @@ sub get_part {
 
     # setup accno hash for <option checked>
     # {amount} is used in create_links
-    for (qw(inventory income expense)) {
+    for (qw(inventory income expense returns)) {
         $form->{amount}{"IC_$_"} = {
             accno       => $form->{"${_}_accno"},
             description => $form->{"${_}_description"}
@@ -255,6 +256,7 @@ sub save {
     ( $form->{inventory_accno} ) = split( /--/, $form->{IC_inventory} );
     ( $form->{expense_accno} )   = split( /--/, $form->{IC_expense} );
     ( $form->{income_accno} )    = split( /--/, $form->{IC_income} );
+    ( $form->{returns_accno} )    = split( /--/, $form->{IC_returns} );
 
     my $dbh = $form->{dbh};
 
@@ -444,12 +446,14 @@ sub save {
 		       notes = ?,
 		       rop = ?,
 		       bin = ?,
-		       inventory_accno_id = (SELECT id FROM chart
+		       inventory_accno_id = (SELECT id FROM account
 		                              WHERE accno = ?),
-		       income_accno_id = (SELECT id FROM chart
+		       income_accno_id = (SELECT id FROM account
 		                           WHERE accno = ?),
-		       expense_accno_id = (SELECT id FROM chart
+		       expense_accno_id = (SELECT id FROM account
 		                            WHERE accno = ?),
+                       returns_accno_id = (SELECT id FROM account
+                                            WHERE accno = ?),
 		       obsolete = ?,
 		       image = ?,
 		       drawing = ?,
@@ -466,7 +470,8 @@ sub save {
         $form->{unit},            $form->{notes},
         $form->{rop},             $form->{bin},
         $form->{inventory_accno}, $form->{income_accno},
-        $form->{expense_accno},   $form->{obsolete},
+        $form->{expense_accno},   $form->{returns_accno},
+        $form->{obsolete},
         $form->{image},           $form->{drawing},
         $form->{microfiche},      $partsgroup_id,
         $form->{id}
@@ -519,7 +524,7 @@ sub save {
 				            (id, parts_id, qty, bom, adj)
 				     VALUES (?, ?, ?, ?, ?)|;
             $sth = $dbh->prepare($query);
-            for $i ( 1 .. $form->{assembly_rows} ) {
+            for $i ( 1 .. $form->{assembly_rows} - 1) {
                 $form->{"qty_$i"} =
                   $form->parse_amount( $myconfig, $form->{"qty_$i"} );
                 if ( !$form->{"bom_$i"} ) {
@@ -801,19 +806,16 @@ sub retrieve_assemblies {
 sub restock_assemblies {
     my ( $self, $myconfig, $form ) = @_;
 
-    # connect to database
-    my $dbh = $form->{dbh};
-
-    for my $i ( 1 .. $form->{rowcount} ) {
-        $form->{"qty_$i"} = $form->parse_amount( $myconfig, $form->{"qty_$i"} );
-
-        if ( $form->{"qty_$i"} ) {
-            &adjust_inventory( $dbh, $form, $form->{"id_$i"},
-                $form->{"qty_$i"} );
-        }
-
+    my $sth;
+    for my $loop ( 1 .. $form->{rowcount} ){
+       my ($id, $qty) = ($form->{"id_$loop"}, $form->{"qty_$loop"});
+       $sth = $form->{dbh}->prepare('SELECT assembly__stock(?, ?)');
+       if ($qty){
+           $sth->execute($id, $qty);
+           $form->dberror() if $form->{dbh}->err;
+       }
     }
-
+    $form->{dbh}->commit;
 
     1;
 
@@ -886,10 +888,6 @@ sub delete {
         $sth   = $dbh->prepare($query);
         $sth->execute( $form->{id} ) || $form->dberror($query);
     }
-
-    $query = qq|DELETE FROM inventory WHERE parts_id = ?|;
-    $sth   = $dbh->prepare($query);
-    $sth->execute( $form->{id} ) || $form->dberror($query);
 
     $query = qq|DELETE FROM partscustomer WHERE parts_id = ?|;
     $sth   = $dbh->prepare($query);
@@ -1048,49 +1046,6 @@ sub create_links {
         ( $form->{currencies} ) = $dbh->selectrow_array($query);
 
     }
-    else {
-
-        # Dieter: FIXME left joins not working
-        $query = qq|
-			SELECT (SELECT value FROM defaults 
-			         WHERE setting_key = 'weightunit') 
-			       AS weightunit,  current_date AS priceupdate,
-			       (SELECT value FROM defaults 
-			         WHERE setting_key = 'curr') AS currencies,
-			       a1.accno AS inventory_accno, 
-			       a1.description AS inventory_description,
-			       a2.accno AS income_accno, 
-			       a2.description AS income_description,
-			       a3.accno AS expense_accno, 
-			       a3.description AS expense_description
-			  FROM account a1, account a2, account a3 
-			 WHERE a1.id IN (SELECT value::int FROM defaults 
-			 WHERE setting_key = 'inventory_accno_id')
-			       AND a2.id IN (SELECT value::int FROM defaults
-			 WHERE setting_key = 'income_accno_id')
-			       AND a3.id IN (SELECT value::int FROM defaults
-			                      WHERE setting_key 
-			                            = 'expense_accno_id')|;
-        $sth = $dbh->prepare($query);
-        $sth->execute || $form->dberror($query);
-
-        $ref = $sth->fetchrow_hashref(NAME_lc);
-        for (qw(weightunit priceupdate currencies)) {
-            $form->{$_} = $ref->{$_};
-        }
-
-        # setup accno hash, {amount} is used in create_links
-        for (qw(inventory income expense)) {
-            $form->{amount}{"IC_$_"} = {
-                accno       => $ref->{"${_}_accno"},
-                description => $ref->{"${_}_description"}
-            };
-        }
-
-        $sth->finish;
-    }
-
-
 }
 
 sub get_warehouses {
@@ -1112,4 +1067,3 @@ sub get_warehouses {
 }
 
 1;
-

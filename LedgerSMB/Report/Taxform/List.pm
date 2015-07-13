@@ -77,6 +77,7 @@ sub name { return LedgerSMB::Report::text('Tax Form List'); }
 sub buttons {
     return  [{
          text => LedgerSMB::Report::text('Add New Tax Form'),
+        value => 'add_taxform',
          name => 'action',
          type => 'submit',
          class => 'submit'
@@ -91,7 +92,7 @@ sub buttons {
 
 sub run_report {
     my ($self) = @_;
-    my @rows = $self->exec_method(funcname => 'tax_form__list_all');
+    my @rows = $self->call_dbmethod(funcname => 'tax_form__list_all');
     for my $row(@rows){
         $row->{row_id} = $row->{id};
         $row->{default_reportable} = ($row->{default_reportable}) 

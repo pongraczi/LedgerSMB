@@ -7,8 +7,7 @@ account search request.
 =head1 SYNOPSIS
 
 A script for journal ajax requests: accepts a search string and returns a
-list of matching accounts in a ul/li pair acceptable for scriptaculous's
-autocomplete library..
+list of matching accounts in a ul/li pair
 
 =head1 METHODS
 
@@ -30,37 +29,6 @@ use strict;
 
 =over
 
-=item __default
-
-Get the search string, query the database, return the results in a ul/li
-pair easily queried by scriptaculous's autocompleter.
-
-=cut
-
-sub __default {
-    my ($request) = @_;
-    my $template;
-    my %hits = ();
-    
-    $template = LedgerSMB::Template->new(
-            path => 'UI',
-            template => 'ajax_li',
-	    format => 'HTML',
-    );
-    
-    my $funcname = 'chart_list_search';
-    my %results_hash;
-    my $search_field = $request->{search_field};
-    $search_field =~ s/-/_/g;
-    my @call_args = ($request->{$search_field}, $request->{link_desc});
-    my @results = $request->call_procedure( procname => $funcname, args => \@call_args, order_by => 'accno' );
-    foreach (@results) { $results_hash{$_->{'accno'}.'--'.$_->{'description'}} = $_->{'accno'}.'--'.$_->{'description'}; 
-    }
-    
-    $request->{results} = \%results_hash;
-    $template->render($request);
-}
-
 =item chart_json
 
 Returns a json array of all accounts
@@ -70,11 +38,12 @@ Returns a json array of all accounts
 sub chart_json {
     my ($request) = @_;
     my $funcname = 'chart_list_all';
-    my @results = $request->call_procedure( procname => $funcname, order_by => 'accno' );
+    my @results = $request->call_procedure( funcname => $funcname, order_by => 'accno' );
     
     my $json = LedgerSMB::REST_Format::json->to_output(\@results);
     my $cgi = CGI::Simple->new();
-    print $cgi->header('application/json', '200 Success');
+    binmode STDOUT, ':raw';
+    print $cgi->header('application/json;charset=UTF-8', '200 Success');
     $cgi->put($json);
 }
 
@@ -86,7 +55,7 @@ Returns and displays the chart of accounts
 
 sub chart_of_accounts {
     my ($request) = @_;
-    for my $col(qw(accno description gifi_accno debit_balance credit_balance)){
+    for my $col(qw(accno description gifi debit_balance credit_balance)){
         $request->{"col_$col"} = '1'; 
     }
     if ($request->is_allowed_role({allowed_roles => ['account_edit']})){
@@ -124,7 +93,7 @@ Runs a search and displays results.
 
 sub search {
     my ($request) = @_;
-    delete $request->{category} if ($request->{category} = 'X');
+    delete $request->{category} if ($request->{category} eq 'X');
     $request->{business_units} = [];
     for my $count (1 .. $request->{bc_count}){
          push @{$request->{business_units}}, $request->{"business_unit_$count"}

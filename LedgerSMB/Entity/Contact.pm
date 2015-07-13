@@ -20,7 +20,7 @@ companies in LedgerSMB.
 
 package LedgerSMB::Entity::Contact;
 use Moose;
-with 'LedgerSMB::DBObject_Moose';
+with 'LedgerSMB::PGObject';
 
 =head1 PROPERTIES
 
@@ -131,14 +131,13 @@ sub list {
 
     my @results;
 
-    for my $ref (__PACKAGE__->call_procedure(procname => 'entity__list_contacts',
+    for my $ref (__PACKAGE__->call_procedure(funcname => 'entity__list_contacts',
                                              args => [$args->{entity_id}])
     ){
-       $self->prepare_dbhash($ref);
        push @results, $self->new($ref);
     }
 
-    for my $ref (__PACKAGE__->call_procedure(procname => 'eca__list_contacts',
+    for my $ref (__PACKAGE__->call_procedure(funcname => 'eca__list_contacts',
                                              args => [$args->{credit_id}])
     ){
        $ref->{credit_id} = $args->{credit_id};
@@ -157,9 +156,9 @@ sub save {
     my ($self) = @_;
     my $ref;
     if ($self->credit_id){
-        ($ref) = $self->exec_method({funcname => 'eca__save_contact'});
+        ($ref) = $self->call_dbmethod(funcname => 'eca__save_contact');
     } elsif ($self->entity_id){
-        ($ref) = $self->exec_method({funcname => 'entity__save_contact'});
+        ($ref) = $self->call_dbmethod(funcname => 'entity__save_contact');
     } else {
         die $LedgerSMB::App_State::Locale->text('Must have credit or entity id');
     }
@@ -179,12 +178,12 @@ contains either entity_id or credit_id, and location_id, and location class.
 
 sub delete {
     my ($ref) = @_;
-    if ($ref->{credit_id}){
-        __PACKAGE__->call_procedure(procname => 'eca__delete_contact',
+    if ($ref->{for_credit}){
+        __PACKAGE__->call_procedure(funcname => 'eca__delete_contact',
                                   args => [$ref->{credit_id}, $ref->{class_id},
                                            $ref->{contact}]);
     } else {
-        __PACKAGE__->call_procedure(procname => 'entity__delete_contact',
+        __PACKAGE__->call_procedure(funcname => 'entity__delete_contact',
                                   args => [$ref->{entity_id}, $ref->{class_id},
                                            $ref->{contact}]);
     }
@@ -198,7 +197,7 @@ Lists classes as unblessed hashrefs
 
 sub list_classes {
     return __PACKAGE__->call_procedure(
-          procname => 'contact_class__list'
+          funcname => 'contact_class__list'
     );
 }
 

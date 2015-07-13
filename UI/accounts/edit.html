@@ -1,19 +1,25 @@
 <?lsmb 
 INCLUDE 'ui-header.html' 
     include_stylesheet =  ['UI/accounts/edit.css']
-    include_script = ['UI/accounts/edit.js']
 ?> 
 <?lsmb PROCESS elements.html ?> 
 <body class="<?lsmb dojo_theme ?>">
-<script type="text/javascript" language="Javascript">
-    var activeDiv = "<?lsmb charttype ?>";
-</script>
-<div class="TabSet" id="account-tabs">
-<div class="lsmbtab" title="<?lsmb text('Heading') ?>" id="H">
-<form method="post" action="<?lsmb form.script ?>">
+<div id="account-tabs"
+     data-dojo-type="dijit/layout/TabContainer">
+<div data-dojo-type="dijit/layout/ContentPane"
+     <?lsmb IF form.charttype == 'H'; ?>
+     data-dojo-props="selected:true"
+     <?lsmb END; ?>
+     title="<?lsmb text('Heading') ?>" id="H">
+<form method="post" action="account.pl">
 <?lsmb PROCESS input element_data = {
         value = 'H'
         name = 'charttype'
+        type = 'hidden'
+} ?>
+<?lsmb PROCESS input element_data = {
+        value = form.id
+        name = 'id'
         type = 'hidden'
 } ?>
 <div class="inputline" id="accno-line">
@@ -53,13 +59,13 @@ INCLUDE 'ui-header.html'
     END;
     form.all_headings.push({});
     INCLUDE select element_data = {
-                  name = 'heading'
+                  name = 'parent'
                options = form.all_headings
-        default_values = [form.heading]
+        default_values = [form.account_heading]
              text_attr = 'text'
             value_attr = 'id'
                  class = 'account'
-                    id = 'heading-h'
+                    id = 'parent'
     }; ?>
    </div>
 </div>
@@ -67,8 +73,12 @@ INCLUDE 'ui-header.html'
 <?lsmb FOREACH button IN buttons; INCLUDE button element_data=button; END ?>
 </form>
 </div>
-<div class="lsmbtab" title="<?lsmb text('Account') ?>" id="A">
-<form method="post" action="<?lsmb form.script ?>">
+<div data-dojo-type="dijit/layout/ContentPane"
+     <?lsmb IF form.charttype == 'A'; ?>
+     data-dojo-props="selected:true"
+     <?lsmb END; ?>
+     title="<?lsmb text('Account') ?>" id="A">
+<form method="post" action="account.pl">
 <?lsmb PROCESS input element_data = {
         value = 'A'
         name = 'charttype'
@@ -123,11 +133,11 @@ INCLUDE 'ui-header.html'
     FOREACH h IN form.all_headings;
         h.text = h.accno _ '--' _ h.description;
     END;
-    form.all_headings.push({});
+    form.all_headings.unshift({});
     INCLUDE select element_data = {
                   name = 'heading'
                options = form.all_headings
-        default_values = [form.heading]
+        default_values = [form.account_heading]
              text_attr = 'text'
             value_attr = 'id'
                  class = 'account'
@@ -138,10 +148,17 @@ INCLUDE 'ui-header.html'
 <div class="inputline" id="gifi-line">
    <label class="line"><?lsmb text('GIFI') ?></label>
    <div class="inputgroup">
-       <?lsmb INCLUDE input element_data={
-            name = 'gifi_accno',
-            size = '9',
-           value = form.gifi_accno} ?>
+       <?lsmb
+          FOREACH g IN form.all_gifi;
+             g.text = g.accno _ '--' _ g.description;
+          END;
+          form.all_gifi.unshift({});
+          INCLUDE select element_data={
+            name = 'gifi_accno'
+          default_values = [form.gifi_accno]
+            options = form.all_gifi
+           text_attr='text'
+          value_attr='accno' } ?>
    </div>
 </div>
 <div class="inputline" id="acctype-line">
@@ -332,6 +349,15 @@ INCLUDE 'ui-header.html'
              value = 'IC_cogs'} ?>
    </div>
    <div class="inputgroup">
+      <?lsmb IF form.IC_expense;IC_expense= 'CHECKED'; END;
+         INCLUDE input element_data={
+              name = 'IC_returns',
+              type = 'checkbox',
+             label = text('Returns'),
+           checked = IC_returns,
+             value = ' IC_returns'} ?>
+   </div>
+   <div class="inputgroup">
       <?lsmb IF form.IC_taxpart; IC_taxpart= 'CHECKED'; END;
          INCLUDE input element_data={
               name = 'IC_taxpart',
@@ -360,15 +386,6 @@ INCLUDE 'ui-header.html'
              label = text('Expense'),
            checked = IC_expense,
              value = 'IC_expense'} ?>
-   </div>
-   <div class="inputgroup">
-      <?lsmb IF form.IC_expense;IC_expense= 'CHECKED'; END;
-         INCLUDE input element_data={
-              name = 'IC_returns',
-              type = 'checkbox',
-             label = text('Returns'),
-           checked = IC_returns,
-             value = ' IC_returns'} ?>
    </div>
    <div class="inputgroup">
       <?lsmb IF form.IC_taxservice; IC_taxservice= 'CHECKED'; END;

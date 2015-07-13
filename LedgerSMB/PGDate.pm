@@ -4,37 +4,21 @@ LedgerSMB::PgDate
 =cut
 
 package LedgerSMB::PGDate;
-use Moose;
 use DateTime::Format::Strptime;
 use LedgerSMB::App_State;
 use Carp;
-use DateTime::Duration;
+use base qw(PGObject::Type::DateTime);
+
+PGObject->register_type(pg_type => $_,
+                                  perl_class => __PACKAGE__)
+   for ('date');
+
 
 =head1 SYNPOSIS
 This class handles formatting and mapping between the DateTime module and
 PostgreSQL. It provides a handler for date and timestamp datatypes.
 
-=head1 PROPERTIES
-
-=over
-
-=item date
-
-A DateTime object for internal storage and processing.
-
-=cut
-
-has date => (isa => 'DateTime', is=> 'ro', required => '0');
-
-=item dummy
-
-If set to 1, this is a dummy value for an unknown value
-
-=cut
-
-has dummy => (isa => 'Bool', is=> 'ro', required => '0');
-
-=back
+The type behaves internally as a Datetime module.
 
 =head1 SUPPORTED FORMATS
 
@@ -76,9 +60,11 @@ On the database side, these are all converted to YYYY-MM-DD format.
 our $formats = { 
     'YYYY-MM-DD' => ['%F'],
     'DD-MM-YYYY' => ['%d-%m-%Y', '%d-%m-%y'],
+    'DD.MM.YYYY' => ['%d.%m.%Y', '%d.%m.%y'],
     'DD/MM/YYYY' => ['%d/%m/%Y', '%D'],
     'MM-DD-YYYY' => ['%m-%d-%Y', '%m-%d-%y'],
     'MM/DD/YYYY' => ['%d/%m/%Y', '%d/%m/%y'],
+    'MM.DD.YYYY' => ['%d.%m.%Y', '%d.%m.%y'],
       'YYYYMMDD' => ['%Y%m%d'],
         'YYMMDD' => ['%y%m%d'],
       'DDMMYYYY' => ['%d%m%Y'],
@@ -125,16 +111,14 @@ module to handle the parsing.
 
 sub _parse_string {
     my ($self, $string, $format, $has_time) = @_;
-    $string = undef if $string eq '';
-    return undef if !defined $string;
-    if (!defined $LedgerSMB::App_State::Locale->{datetime}){
-        $LedgerSMB::App_State::Locale->{datetime} = 'en_US';
-    }
+    return undef if (!defined $string) or ('' eq $string);
+    my $locale = $LedgerSMB::App_State::Locale->{datetime};
+    $locale ||= 'en_US';
     for my $fmt (@{$formats->{$format}}){
         if ($has_time or ! defined $has_time){
             my $parser = new DateTime::Format::Strptime(
                      pattern => $fmt . ' %T',
-                      locale => $LedgerSMB::App_State::Locale->{datetime},
+                      locale => $locale,
             );
             if (my $dt = $parser->parse_datetime($string)){
                 return $dt;
@@ -143,7 +127,7 @@ sub _parse_string {
         if (!$has_time or ! defined $has_time){
             my $parser = new DateTime::Format::Strptime(
                      pattern => $fmt,
-                      locale => $LedgerSMB::App_State::Locale->{datetime},
+                      locale => 'en_US',
             );
             if (my $dt = $parser->parse_datetime($string)){
                 return $dt;
@@ -155,11 +139,13 @@ sub _parse_string {
 sub from_input{
     my ($self, $input, $has_time) = @_;
     return $input if eval {$input->isa(__PACKAGE__)};
+    #return if (!defined $input) || ('' eq $input);
     $input = undef if $input eq '';
-    my $format = $LedgerSMB::App_State::User->{dateformat};
+    my $format = $LedgerSMB::App_State::User->{dateformat} || 'yyyy-mm-dd';
     $format ||= 'yyyy-mm-dd';
     $format = 'yyyy-mm-dd' if $input =~ /^\d{4}/;
-    my $dt =  _parse_string($self, $input, uc($format), $has_time);
+    my $dt =  _parse_string($self, $input, uc($format), $has_time)
+		  if $input;
     my %prop = (date => $dt, dummy => !defined $dt);
     delete $prop{date} unless defined $prop{date} and $prop{date} ne '';
     return $self->new(%prop);
@@ -175,7 +161,8 @@ used.  If $format is not supplied, the dateformat of the user is used.
 
 sub to_output {
     my ($self) = @_;
-    return undef if !defined $self->date;
+    #return undef if !defined $self;
+	 return undef if !defined $self->{date};
     my $fmt;
     if (defined $LedgerSMB::App_State::User->{dateformat}){
         $fmt = $LedgerSMB::App_State::User->{dateformat};
@@ -183,59 +170,19 @@ sub to_output {
         $fmt = '%F';
     }
     $fmt = $formats->{uc($fmt)}->[0] if defined $formats->{uc($fmt)};
-    $fmt .= ' %T' if ($self->date->hour);
+    $fmt .= ' %T' if ($self->hour);
     
     my $formatter = new DateTime::Format::Strptime(
              pattern => $fmt,
-              locale => $LedgerSMB::App_State::Locale->{datetime},
+              locale => 'en_US',
             on_error => 'croak',
     );
-    return $formatter->format_datetime($self->date);
+    return $formatter->format_datetime($self);
 }
 
-=item from_db (string $date, string $type)
-
-The $date is the date or datetime value from the db. The type is either 'date',
-'timestamp', or 'datetime'.
-
-=cut
-
-sub from_db {
-    use Carp;
-    my ($self, $input, $type) = @_;
-    return undef if !defined $input;
-    my $format = 'YYYY-MM-DD';
-    my $has_time;
-    if ((lc($type) eq 'datetime') or (lc($type) eq 'timestamp')) {
-        $has_time = 1;
-    } elsif(lc($type) eq 'date'){
-        $has_time = 0;
-    } else {
-       confess 'LedgerSMB::PGDate Invalid DB Type';
-    }
-    my $dt =  _parse_string($self, $input, $format, $has_time);
-    my %prop = (date => $dt, dummy => !defined $dt);
-    delete $prop{date} unless defined $prop{date} and $prop{date} ne '';
-
-    return $self->new(%prop);
-}
-
-=item to_db
-This returns the preferred form for database queries.
-
-=cut
-
-sub to_db {
-    my ($self) = @_;
-    return undef if !defined $self->date;
-    my $fmt = $formats->{'YYYY-MM-DD'}->[0];
-    $fmt .= ' %T' if ($self->date->hour);
-    my $formatter = new DateTime::Format::Strptime(
-             pattern => $fmt,
-              locale => $LedgerSMB::App_State::Locale->{datetime},
-            on_error => 'croak',
-    );
-    return $formatter->format_datetime($self->date);
+sub to_sort {
+    my $self = shift;
+    return $self->epoch;
 }
 
 #__PACKAGE__->meta->make_immutable;

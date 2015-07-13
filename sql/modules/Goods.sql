@@ -1,97 +1,143 @@
 BEGIN;
 
+CREATE OR REPLACE FUNCTION part__get_by_id(in_id int) returns parts
+language sql as
+$$
+select * from parts where id = $1;
+$$;
+
+
+CREATE OR REPLACE FUNCTION mfg_lot__commit(in_id int)
+RETURNS numeric LANGUAGE PLPGSQL AS
+$$
+DECLARE t_mfg_lot mfg_lot;
+BEGIN
+    SELECT * INTO t_mfg_lot FROM mfg_lot WHERE id = $1;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Lot not found';
+    END IF;
+
+    UPDATE parts SET onhand = onhand 
+                              - (select t_mfg_lot.qty from mfg_lot_item
+                                  WHERE parts_id = parts.id AND
+                                        mfg_lot_id = $1)
+     WHERE id in (select parts_id from mfg_lot_item 
+                   WHERE mfg_lot_id = $1);
+
+    UPDATE parts SET onhand = onhand + t_mfg_lot.qty 
+     where id = t_mfg_lot.parts_id;
+
+    INSERT INTO gl (reference, description, transdate, approved)
+    values ('mfg-' || $1::TEXT, 'Manufacturing lot', 
+            now(), true);
+
+    INSERT INTO invoice (trans_id, parts_id, qty, allocated)
+    SELECT currval('id')::int, parts_id, qty, 0
+      FROM mfg_lot_item WHERE mfg_lot_id = $1;
+
+    PERFORM cogs__add_for_ar_line(id) FROM invoice 
+      WHERE trans_id = currval('id')::int;
+      
+
+    PERFORM * FROM invoice 
+      WHERE qty + allocated <> 0 AND trans_id = currval('id')::int;
+
+    IF FOUND THEN
+       RAISE EXCEPTION 'Not enough parts in stock';
+    END IF;
+
+    INSERT INTO invoice (trans_id, parts_id, qty, allocated, sellprice)
+    SELECT currval('id')::int, t_mfg_lot.parts_id, t_mfg_lot.qty * -1, 0, 
+           sum(amount) / t_mfg_lot.qty
+      FROM acc_trans 
+     WHERE amount < 0 and trans_id = currval('id')::int;
+
+    PERFORM cogs__add_for_ap_line(currval('invoice_id_seq')::int);
+
+    -- move from reverse COGS.
+    INSERT INTO acc_trans(trans_id, chart_id, transdate, amount)
+    SELECT trans_id, chart_id, transdate, amount * -1
+      FROM acc_trans 
+     WHERE amount < 0 and trans_id = currval('id')::int;
+
+    -- difference goes into inventory
+    INSERT INTO acc_trans(trans_id, transdate, amount, chart_id)
+    SELECT trans_id, now(), sum(amount) * -1,
+           (select inventory_accno_id from parts where id = t_mfg_lot.parts_id)
+      FROM acc_trans
+     WHERE trans_id = currval('id')::int
+  GROUP BY trans_id;
+
+
+    RETURN t_mfg_lot.qty;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION assembly__stock(in_parts_id int, in_qty numeric)
+RETURNS numeric LANGUAGE SQL AS $$
+    INSERT INTO mfg_lot(parts_id, qty) VALUES ($1, $2);
+    INSERT INTO mfg_lot_item(mfg_lot_id, parts_id, qty)
+    SELECT currval('mfg_lot_id_seq')::int, parts_id, qty * $2
+      FROM assembly WHERE id = $1;
+
+    SELECT mfg_lot__commit(currval('mfg_lot_id_seq')::int);
+$$;
+
 DROP TYPE IF EXISTS goods_search_result CASCADE;
 
 CREATE TYPE goods_search_result AS (
-   invnumber text,
-   trans_id int,
-   ordnumber text,
-   ord_id int,
-   quonumber text,
-   partnumber text,
-   id int,
-   description text,
-   onhand numeric,
-   qty numeric,
-   unit varchar,
-   price_updated date,
-   partsgroup text,
-   listprice numeric,
-   sellprice numeric,
-   lastcost numeric,
-   avgcost numeric,
-   linetotal numeric, 
-   markup numeric,
-   bin text,
-   rop numeric,
-   weight numeric,
-   notes text,
-   image text,
-   drawing text,
-   microfiche text,
-   make text,
-   model text,
-   curr char(3),
-   serialnumber text,
-   module text
+partnumber text,
+id int, 
+description text, 
+onhand numeric, 
+unit text, 
+priceupdate date,
+partsgroup text,
+listprice numeric, 
+sellprice numeric, 
+lastcost numeric, 
+avgcost numeric,
+markup numeric,
+bin text,
+rop numeric,
+weight numeric,
+notes text,
+image text,
+drawing text,
+microfische text,
+make text,
+model text
 );
 
-CREATE OR REPLACE FUNCTION goods__search 
+DROP FUNCTION IF EXISTS goods__search
 (in_partnumber text, in_description text,
  in_partsgroup_id int, in_serial_number text, in_make text,
  in_model text, in_drawing text, in_microfiche text,
  in_status text, in_date_from date, in_date_to date,
  in_sales_invoices bool, in_purchase_invoices bool,
  in_sales_orders bool, in_purchase_orders bool, in_quotations bool, 
- in_rfqs bool)
+ in_rfqs bool);
+
+CREATE OR REPLACE FUNCTION goods__search 
+(in_partnumber text, in_description text,
+ in_partsgroup_id int, in_serial_number text, in_make text,
+ in_model text, in_drawing text, in_microfiche text,
+ in_status text, in_date_from date, in_date_to date)
 RETURNS SETOF goods_search_result 
 LANGUAGE PLPGSQL STABLE AS $$
 BEGIN
 
--- Trying a CTE here to cut down on left joins.
 RETURN QUERY 
-         WITH orders (invnumber, id, ordnumber, quonumber, qty, sellprice, 
-              serialnumber, recordtype, oe_class_id, parts_id, curr) as 
-      (SELECT a.invnumber, a.id, null::text, null::text, i.qty, i.sellprice, 
-              i.serialnumber, a.recordtype, null::int, i.parts_id, a.curr
-         FROM (SELECT id, invnumber, 'is'::text as recordtype, transdate, curr
-                 FROM ar WHERE in_sales_invoices
-                UNION
-               SELECT id, invnumber, 'ir'::text as recordtype, transdate, curr
-                 FROM ap WHERE in_purchase_invoices
-              ) a
-         JOIN invoice i ON i.trans_id = a.id
-        WHERE (in_date_from is null or in_date_from >= a.transdate) and
-              (in_date_to is null or in_date_to <= a.transdate)
-        UNION
-       SELECT null::text, o.id, o.ordnumber, o.quonumber, i.qty, i.sellprice, 
-              i.serialnumber, 'oe', oe_class_id, i.parts_id, o.curr
-         FROM oe o
-         JOIN orderitems i ON o.id = i.trans_id
-        WHERE (o.oe_class_id = 1 AND in_sales_orders)
-              OR (o.oe_class_id = 2 AND in_purchase_orders)
-              OR (o.oe_class_id = 3 AND in_quotations)
-              OR (o.oe_class_id = 4 AND in_rfqs)
-              AND((in_date_from is null or in_date_from >= o.transdate) and
-              (in_date_to is null or in_date_to <= o.transdate))
-       )
-       SELECT o.invnumber, 
-              CASE WHEN o.recordtype in ('ir', 'is') THEN o.id ELSE NULL END, 
-              o.ordnumber, 
-              CASE WHEN o.recordtype = 'oe' THEN o.id ELSE NULL END, 
-              o.quonumber, p.partnumber, 
-              p.id, p.description, p.onhand, o.qty, p.unit, p.priceupdate, 
+       SELECT p.partnumber, 
+              p.id, p.description, p.onhand, p.unit::text, p.priceupdate, 
               pg.partsgroup,
               p.listprice, p.sellprice, p.lastcost, p.avgcost, 
-              o.qty * o.sellprice as linetotal, 
               CASE WHEN p.lastcost = 0 THEN NULL
                    ELSE ((p.sellprice / p.lastcost) - 1) * 100 
               END as markup,
               p.bin, p.rop, p.weight, p.notes, p.image, p.drawing, p.microfiche,
-              m.make, m.model, o.curr,
-              o.serialnumber, o.recordtype
+              m.make, m.model
          FROM parts p
-    LEFT JOIN orders o ON o.parts_id = p.id
     LEFT JOIN makemodel m ON m.parts_id = p.id
     LEFT JOIN partsgroup pg ON p.partsgroup_id = pg.id
         WHERE (in_partnumber is null or p.partnumber ilike in_partnumber || '%')
@@ -99,13 +145,15 @@ RETURN QUERY
                   or p.description @@ plainto_tsquery(in_description))
               AND (in_partsgroup_id is null 
                   or p.partsgroup_id = in_partsgroup_id )
-              AND (in_serial_number is null
-                  or o.serialnumber = in_serial_number)
               AND (in_make is null or m.make ilike in_make || '%')
               AND (in_model is null or m.model  ilike in_model || '%')
               AND (in_drawing IS NULL OR p.drawing ilike in_drawing || '%')
               AND (in_microfiche IS NULL
                   OR p.microfiche ilike in_microfiche || '%')
+              AND (in_serial_number IS NULL OR p.id IN
+                      (select parts_id from invoice
+                        where in_serial_number is not null
+                              and serialnumber = in_serial_number))
               AND ((in_status = 'active' and not p.obsolete) 
                    OR (in_status = 'obsolete' and p.obsolete)
                    OR (in_status = 'short' and p.onhand <= p.rop)
@@ -377,6 +425,74 @@ RETURNS SETOF warehouse
 LANGUAGE SQL AS
 $$
 SELECT * FROM warehouse ORDER BY DESCRIPTION;
+$$;
+
+drop type if exists parts_history_result cascade;
+CREATE TYPE parts_history_result AS (
+id int,
+partnumber text,
+transdate date,
+description text,
+bin text,
+ord_id int,
+ordnumber text,
+ordtype text,
+meta_number text,
+name text,
+sellprice numeric,
+qty numeric,
+discount numeric,
+serial_number text
+);
+
+CREATE OR REPLACE FUNCTION goods__history(
+  in_date_from date, in_date_to date, 
+  in_partnumber text, in_description text, in_serial_number text,
+  in_inc_po bool, in_inc_so bool, in_inc_quo bool, in_inc_rfq bool,
+  in_inc_is bool, in_inc_ir bool
+) RETURNS SETOF parts_history_result LANGUAGE PLPGSQL AS
+$$
+BEGIN
+RETURN QUERY
+  SELECT p.id, p.partnumber, o.transdate, p.description, p.bin,
+         o.id as ord_id, o.ordnumber, o.oe_class, eca.meta_number::text, e.name,
+         i.sellprice, i.qty, i.discount, i.serialnumber
+    FROM parts p
+    JOIN (select id, trans_id, parts_id, sellprice, qty, discount, serialnumber,
+                 'o' as i_type
+            FROM orderitems
+           UNION
+          SELECT id, trans_id, parts_id, sellprice, qty, discount, serialnumber,
+                 'i' as i_type
+            FROM invoice) i ON p.id = i.parts_id
+    JOIN (select o.id, 'oe' as o_table, ordnumber as ordnumber, c.oe_class,
+                 o.oe_class_id, o.transdate, o.entity_credit_account
+            FROM oe o
+            JOIN oe_class c ON o.oe_class_id = c.id
+           UNION
+          SELECT id, 'ar' as o_table, invnumber as ordnumber, 'is' as oe_class,
+                 null, transdate, entity_credit_account
+            FROM ar
+           UNION 
+          SELECT id, 'ap' as o_table, invnumber as ordnumber, 'ir' as oe_class,
+                 null, transdate, entity_credit_account
+            FROM ap) o ON o.id = i.trans_id 
+                          AND (o_table = 'oe') = (i_type = 'o')
+    JOIN entity_credit_account eca ON o.entity_credit_account = eca.id
+    JOIN entity e ON e.id = eca.entity_id 
+   WHERE (in_partnumber is null or p.partnumber like in_partnumber || '%')
+         AND (in_description IS NULL 
+              OR p.description @@ plainto_tsquery(in_description))
+         AND (in_date_from is null or in_date_from <= o.transdate)
+         and (in_date_to is null or in_date_to >= o.transdate)
+         AND (in_inc_po is not true or o.oe_class = 'Purchase Order')
+         AND (in_inc_so is not true or o.oe_class = 'Sales Order')
+         AND (in_inc_quo is not true or o.oe_class = 'Quotation')
+         AND (in_inc_rfq is not true or o.oe_class = 'RFQ')
+         AND (in_inc_ir is not true or o.oe_class = 'ir')
+         AND (in_inc_is is not true or o.oe_class = 'is')
+ORDER BY o.transdate desc, o.id desc;
+END;
 $$;
 
 update defaults set value = 'yes' where setting_key = 'module_load_ok';

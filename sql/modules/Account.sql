@@ -113,7 +113,7 @@ END;
 $$ LANGUAGE PLPGSQL;
 
 COMMENT ON FUNCTION chart_get_ar_ap(in_account_class int) IS
-$$ This function returns the cash account acording with in_account_class which 
+$$ This function returns the cash account according with in_account_class which 
 must be 1 or 2.
 
 If in_account_class is 1 then it returns a list of AP accounts, and if 
@@ -449,6 +449,20 @@ COMMENT ON FUNCTION account_heading_save
 (in_id int, in_accno text, in_description text, in_parent int) IS
 $$ Saves an account heading. $$;
 
+CREATE OR REPLACE FUNCTION account_heading__delete(in_id int)
+RETURNS BOOL AS
+$$
+BEGIN
+DELETE FROM account_heading WHERE id = in_id;
+RETURN FOUND;
+END;
+$$ LANGUAGE PLPGSQL;
+
+COMMENT ON FUNCTION account_heading__delete(int) IS
+$$ This deletes an account heading with the id specified.  If the heading has 
+accounts associated with it, it will fail and raise a foreign key constraint.
+$$;
+
 CREATE OR REPLACE RULE chart_i AS ON INSERT TO chart
 DO INSTEAD
 SELECT CASE WHEN new.charttype='H' THEN 
@@ -585,20 +599,30 @@ l(account_id, link) AS (
      SELECT account_id, array_to_string(array_agg(description), ':')
        FROM account_link
    GROUP BY account_id
+),
+hh(parent_id) AS (
+     SELECT parent_id
+       FROM account_heading
+),
+ha(heading) AS (
+     SELECT heading
+       FROM account
 )
 SELECT a.id, a.is_heading, a.accno, a.description, a.gifi_accno, 
        CASE WHEN sum(ac.amount) < 0 THEN sum(amount) * -1 ELSE null::numeric
         END,
        CASE WHEN sum(ac.amount) > 0 THEN sum(amount) ELSE null::numeric END,
-       count(ac.*), l.link
-  FROM (SELECT id,false as is_heading, accno, description, gifi_accno
+       count(ac.*)+count(hh.*)+count(ha.*), l.link
+  FROM (SELECT id, heading, false as is_heading, accno, description, gifi_accno
           FROM account
          UNION
-        SELECT id, true, accno, description, null::text 
+        SELECT id, parent_id, true, accno, description, null::text 
           FROM account_heading) a
 
  LEFT JOIN ac ON ac.chart_id = a.id AND not a.is_heading
  LEFT JOIN l ON l.account_id = a.id AND NOT a.is_heading
+ LEFT JOIN hh ON hh.parent_id = a.id AND a.is_heading
+ LEFT JOIN ha ON ha.heading = a.id AND a.is_heading
   GROUP BY a.id, a.is_heading, a.accno, a.description, a.gifi_accno, l.link
   ORDER BY a.accno;
 
@@ -616,7 +640,7 @@ WITH RECURSIVE account_headings AS (
     SELECT id, accno, 1 as level, accno as path
       FROM account_heading
     UNION ALL
-    SELECT ah.id, ah.accno, at.level + 1 as level, at.path  || '||||' accno
+    SELECT ah.id, ah.accno, at.level + 1 as level, at.path  || '||||' || ah.accno
       FROM account_heading ah
       JOIN account_headings at ON ah.parent_id = at.id
 )
@@ -628,6 +652,39 @@ LANGUAGE SQL AS
 $$
 SELECT * FROM gifi ORDER BY accno;
 $$;
+
+CREATE OR REPLACE FUNCTION account_heading__check_tree()
+RETURNS TRIGGER LANGUAGE PLPGSQL AS $$
+BEGIN
+
+PERFORM* from ( 
+  WITH RECURSIVE account_headings AS (
+      SELECT id, accno, 1 as level, accno as path
+        FROM account_heading
+      UNION ALL
+      SELECT ah.id, ah.accno, at.level + 1 as level, at.path  || '||||' || ah.accno
+        FROM account_heading ah
+        JOIN account_headings at ON ah.parent_id = at.id
+       WHERE NOT ah.accno = ANY(string_to_array(path, '||||'))
+  )
+  SELECT * 
+    FROM account_heading ah
+    JOIN account_headings at ON ah.parent_id = at.id
+   WHERE at.path || '||||' ||  ah.accno NOT IN 
+          (select path from account_headings)
+) x;
+
+IF found then
+   RAISE EXCEPTION 'ACCOUNT_HEADING_LOOP';
+END IF;
+
+RETURN NEW;
+end;
+$$;
+
+DROP TRIGGER IF EXISTS loop_detection ON account_heading;
+CREATE TRIGGER loop_detection AFTER INSERT OR UPDATE ON account_heading
+FOR EACH ROW EXECUTE PROCEDURE account_heading__check_tree();
 
 update defaults set value = 'yes' where setting_key = 'module_load_ok';
 
