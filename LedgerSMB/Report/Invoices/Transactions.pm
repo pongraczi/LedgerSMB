@@ -261,17 +261,18 @@ sub columns {
            type => 'text'},
        { col_id => 'entity_name',
            name => $entity_name_label,
+       href_base =>"contact.pl?action=get&entity_class=".$self->entity_class,
            type => 'href', },
        { col_id => 'invnumber',
            name => LedgerSMB::Report::text('Invoice'),
            type => 'href'},
-       { col_id => 'amount',
+       { col_id => 'netamount',
            name => LedgerSMB::Report::text('Amount'),
            type => 'text'},
        { col_id => 'tax',
            name => LedgerSMB::Report::text('Tax'),
            type => 'text'},
-       { col_id => 'netamount',
+       { col_id => 'amount',
            name => LedgerSMB::Report::text('Total'),
            type => 'text'},
        { col_id => 'paid',
@@ -341,7 +342,7 @@ This runs the report and sets the $report->rows.
 sub run_report {
     my $self = shift;
     $ENV{LSMB_ALWAYS_MONEY} = 1;
-    my @rows = $self->exec_method({funcname => 'report__aa_transactions'});
+    my @rows = $self->call_dbmethod(funcname => 'report__aa_transactions');
     for my $r(@rows){
         my $script;
         if ($self->entity_class == 2) {
@@ -349,6 +350,8 @@ sub run_report {
         } else {
              $script = ($r->{invoice}) ? 'ir.pl' : 'ap.pl';
         }
+        $r->{entity_name_href_suffix} =
+               "&entity_id=$r->{entity_id}&meta_number=$r->{meta_number}";
         $r->{invnumber_href_suffix} = "$script?action=edit&id=$r->{id}";
     }
     $self->rows(\@rows);

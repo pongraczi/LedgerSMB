@@ -65,8 +65,10 @@ sub columns {
     my $self = shift;
     my $from_date = $self->from_date;
     $from_date = $from_date->to_db if $from_date;
+    $from_date ||= '';
     my $to_date = $self->to_date;
     $to_date = $to_date->to_db if $to_date;
+    $to_date ||= '';
     return [
      {col_id => 'partnumber',
         type => 'text',
@@ -79,10 +81,10 @@ sub columns {
      {col_id => 'sold',
         type => 'href',
         name => LedgerSMB::Report::text('Sold'), 
-   href_base => "invoice.pl&from_date=$from_date&to_date=$to_date"
-                . "&open=1&closed=1&"
+   href_base => "invoice.pl?&from_date=$from_date&to_date=$to_date"
+                . "&open=1&closed=1&action=invoice_search&"
                 . 'col_invnumber=1&col_transdate=1&col_entity_name=1&'
-                . 'col_netamount=1&entity_class=2&parts_id=',
+                . 'col_netamount=1&entity_class=2&partnumber=',
      },
 
      {col_id => 'receivable',
@@ -93,10 +95,10 @@ sub columns {
      {col_id => 'purchased',
         type => 'href',
         name => LedgerSMB::Report::text('Purchased'), 
-   href_base => "invoice.pl&date_from=$self->date_from&date_to=$self->date_to"
-                . "&open=1&closed=1&"
+   href_base => "invoice.pl?&date_from=$self->date_from&date_to=$self->date_to"
+                . "&open=1&closed=1&action=invoice_search&"
                 . 'col_invnumber=1&col_transdate=1&col_entity_name=1&'
-                . 'col_netamount=1&entity_class=1&parts_id=',
+                . 'col_netamount=1&entity_class=1&partnumber=',
      },
 
      {col_id => 'payable',
@@ -150,9 +152,9 @@ sub name {
 
 sub run_report {
     my ($self) = @_;
-    my @rows = $self->exec_method({funcname => 'inventory__activity'});
+    my @rows = $self->call_dbmethod(funcname => 'inventory__activity');
     for my $r (@rows) {
-       $r->{row_id} = $r->{parts_id};
+       $r->{row_id} = $r->{partnumber};
     }
     $self->rows(\@rows);
 }

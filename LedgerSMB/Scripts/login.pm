@@ -26,6 +26,17 @@ use LedgerSMB::Auth;
 use LedgerSMB::Sysconfig;
 use strict;
 
+=item no_db_actions
+
+Returns an array of actions which should not receive
+a request object /not/ connected to the database.
+
+=cut
+
+sub no_db_actions {
+    return qw(logout authenticate __default logout_js);
+}
+
 =item __default (no action specified, do this)
 
 Displays the login screen.
@@ -85,7 +96,7 @@ sub authenticate {
     elsif ($request->{dbh} and !$request->{log_out}){
         print "Content-Type: text/html\n";
         print "Set-Cookie: ${LedgerSMB::Sysconfig::cookie_name}=Login; path=$path\n";
-	    print "Status: 200 Success\n\n";
+	    print "Status: 200 Success\n\nSuccess\n";
         if ($request->{log_out}){
             $request->finalize_request();
         }

@@ -20,10 +20,10 @@ included COPYRIGHT and LICENSE files for more information.
 
 package LedgerSMB::DBObject::Payment;
 use LedgerSMB::Num2text;
-use base qw(LedgerSMB::DBObject);
+use base qw(LedgerSMB::PGOld);
 use strict;
-use Math::BigFloat lib => 'GMP';
-use Data::Dumper;
+use LedgerSMB::PGNumber;
+
 our $VERSION = '0.1.0';
 
 =head1 METHODS
@@ -100,18 +100,18 @@ sub get_metadata {
     for my $c (@{$self->{openCurrencies}}){
         push @{$self->{currencies}}, $c->{payments_get_open_currencies};
     }
-    @{$self->{businesses}} = $self->exec_method(
+    @{$self->{businesses}} = $self->call_dbmethod(
 		funcname => 'business_type__list'
     );
 
-   @{$self->{payment_types}} = $self->exec_method(
+   @{$self->{payment_types}} = $self->call_dbmethod(
 		funcname => 'payment_type__list'
     );
     
 
     if($self->{payment_type_id})
     {
-       @{$self->{payment_type_label_id}} =$self->exec_method(
+       @{$self->{payment_type_label_id}} =$self->call_dbmethod(
 		funcname => 'payment_type__get_label'  );
        
        $self->{payment_type_return_id}=$self->{payment_type_label_id}->[0]->{id};
@@ -121,15 +121,15 @@ sub get_metadata {
     }
 
 
-    @{$self->{debt_accounts}} = $self->exec_method(
+    @{$self->{debt_accounts}} = $self->call_dbmethod(
 		funcname => 'chart_get_ar_ap');
-    @{$self->{cash_accounts}} = $self->exec_method(
+    @{$self->{cash_accounts}} = $self->call_dbmethod(
 		funcname => 'chart_list_cash');
     for my $ref(@{$self->{cash_accounts}}){
         $ref->{text} = "$ref->{accno}--$ref->{description}";
     }
     if ($self->{batch_id} && !defined $self->{batch_date}){
-        my ($ref) = $self->exec_method(funcname => 'voucher_get_batch');
+        my ($ref) = $self->call_dbmethod(funcname => 'voucher_get_batch');
         $self->{batch_date} = $ref->{default_date};
     }
 }
@@ -149,14 +149,14 @@ Search results are also stored at $payment->{search_results}.
 sub search {
     my ($self) = @_;
     if ($self->{meta_number} && !$self->{credit_id}){
-        my ($ref) = $self->exec_method(
+        my ($ref) = $self->call_dbmethod(
 		funcname => 'entity_credit_get_id_by_meta_number'
         );
         my @keys = keys %$ref;
         my $key = shift @keys;
         $self->{credit_id} = $ref->{$key};
     }
-    @{$self->{search_results}} = $self->exec_method(
+    @{$self->{search_results}} = $self->call_dbmethod(
 		funcname => 'payment__search'
     );
     return @{$self->{search_results}};
@@ -177,7 +177,7 @@ These are also stored on $payment->{accounts}
 sub get_open_accounts {
     my ($self) = @_;
     @{$self->{accounts}} = 
-        $self->exec_method(funcname => 'payment_get_open_accounts');
+        $self->call_dbmethod(funcname => 'payment_get_open_accounts');
     return @{$self->{accounts}};
 }
 
@@ -200,10 +200,10 @@ sub get_entity_credit_account{
   # refactoring later.  -CT
   if ($self->{credit_id}){
     @{$self->{entity_accounts}} =
-      $self->exec_method(funcname => 'payment_get_entity_account_payment_info');
+      $self->call_dbmethod(funcname => 'payment_get_entity_account_payment_info');
    } else {
      @{$self->{entity_accounts}} =
-        $self->exec_method(funcname => 'payment_get_entity_accounts');
+        $self->call_dbmethod(funcname => 'payment_get_entity_accounts');
    }
    return  @{$self->{entity_accounts}};
 }
@@ -227,7 +227,7 @@ Each hashref has the following keys:  id (entity id), name, and entity_class.
 sub get_all_accounts {
     my ($self) = @_;
     @{$self->{accounts}} = 
-        $self->exec_method(funcname => 'payment_get_all_accounts');
+        $self->call_dbmethod(funcname => 'payment_get_all_accounts');
     return @{$self->{accounts}};
 }
 =over
@@ -245,7 +245,7 @@ $payment->{account_class}).  This reverses the entries with that source.
 
 sub reverse {
     my ($self) = @_;
-    $self->exec_method(funcname => 'payment__reverse');
+    $self->call_dbmethod(funcname => 'payment__reverse');
 }  
 
 =over
@@ -271,7 +271,7 @@ discount numeric, discount_fx numeric, due numeric, due_fx numeric,
 sub get_open_invoices {
     my ($self) = @_;
     @{$self->{open_invoices}} = 
-        $self->exec_method(funcname => 'payment_get_open_invoices');
+        $self->call_dbmethod(funcname => 'payment_get_open_invoices');
     return @{$self->{open_invoices}};
 }
 
@@ -290,7 +290,7 @@ variable
 sub get_open_invoice {
     my ($self) = @_;
     @{$self->{open_invoice}} = 
-        $self->exec_method(funcname => 'payment_get_open_invoice');
+        $self->call_dbmethod(funcname => 'payment_get_open_invoice');
     return @{$self->{open_invoice}};
 }
 
@@ -333,7 +333,7 @@ Each hashref has the following keys:  id (entity id), name, and entity_class.
 sub get_all_contact_invoices {
     my ($self) = @_;
     @{$self->{contacts}} = 
-        $self->exec_method(funcname => 'payment_get_all_contact_invoices');
+        $self->call_dbmethod(funcname => 'payment_get_all_contact_invoices');
 
     # When arrays of complex types are supported by all versions of Postgres
     # that this application supports, we should look at doing type conversions
@@ -347,7 +347,7 @@ sub get_all_contact_invoices {
                  $new_invoice->{$_} = shift @$invoice;
                  if ($_ =~ /^(amount|discount|due)$/){
                      $new_invoice->{$_} = 
-                          Math::BigFloat->new($new_invoice->{$_});
+                          LedgerSMB::PGNumber->new($new_invoice->{$_});
                  }
             }
             push(@$processed_invoices, $new_invoice);
@@ -374,7 +374,7 @@ projects.  The list is attached to $self->{projects} and returned.
 sub list_open_projects {
     my ($self) = @_;
     @{$self->{projects}} = $self->call_procedure( 
-         procname => 'project_list_open',  args => [$self->{current_date}] 
+         funcname => 'project_list_open',  args => [$self->{current_date}] 
     );
     return  @{$self->{projects}};
 }
@@ -395,7 +395,7 @@ sub list_departments {
   my ($self) = shift @_;
   my @args = @_;
   @{$self->{departments}} = $self->call_procedure( 
-      procname => 'department_list', 
+      funcname => 'department_list', 
       args => \@args
   );
   return @{$self->{departments}};
@@ -428,7 +428,7 @@ WARNING THIS IS NOT BEEING USED BY THE SINGLE PAYMENT SYSTEM....
 
 sub get_open_currencies {
   my ($self) = shift @_;
-  @{$self->{openCurrencies}} = $self->exec_method( funcname => 'payments_get_open_currencies');
+  @{$self->{openCurrencies}} = $self->call_dbmethod( funcname => 'payments_get_open_currencies');
   return @{$self->{openCurrencies}};
 }
 
@@ -439,12 +439,12 @@ sub get_open_currencies {
 
 This method lists all accounts that match the role specified in account_class property and
 are available to store the payment or receipts. 
-=back
+
 =cut
 
 sub list_accounting {
  my ($self) = @_;
- @{$self->{pay_accounts}} = $self->exec_method( funcname => 'chart_list_cash');
+ @{$self->{pay_accounts}} = $self->call_dbmethod( funcname => 'chart_list_cash');
  return @{$self->{pay_accounts}}; 
 }
 
@@ -452,12 +452,12 @@ sub list_accounting {
 
 This method lists all accounts that match the role specified in account_class property and
 are available to store an overpayment / advanced payment / pre-payment. 
-=back
+
 =cut
 
 sub list_overpayment_accounting {
  my ($self) = @_;
- @{$self->{overpayment_accounts}} = $self->exec_method( funcname => 'chart_list_overpayment');
+ @{$self->{overpayment_accounts}} = $self->call_dbmethod( funcname => 'chart_list_overpayment');
  return @{$self->{overpayment_accounts}}; 
 }
 
@@ -466,7 +466,6 @@ sub list_overpayment_accounting {
 
 This method builds all the possible sources of money,
 in the future it will look inside the DB. 
-=back
 
 =cut
 
@@ -488,7 +487,7 @@ This method gets the exchange rate for the specified currency and date
 sub get_exchange_rate { 
  my ($self) = shift @_;
  ($self->{currency}, $self->{date}) = @_;
- ($self->{exchangerate}) = $self->exec_method(funcname => 'currency_get_exchangerate'); 
+ ($self->{exchangerate}) = $self->call_dbmethod(funcname => 'currency_get_exchangerate'); 
   return $self->{exchangerate}->{currency_get_exchangerate};
  
 }
@@ -496,13 +495,12 @@ sub get_exchange_rate {
 =item get_default_currency
 
 This method gets the default currency 
-=back
 
 =cut
 
 sub get_default_currency {
  my ($self) = shift @_;
- ($self->{default_currency}) = $self->call_procedure(procname => 'defaults_get_defaultcurrency');
+ ($self->{default_currency}) = $self->call_procedure(funcname => 'defaults_get_defaultcurrency');
  return $self->{default_currency}->{defaults_get_defaultcurrency};
 }
 
@@ -528,7 +526,7 @@ sub get_vc_info {
  my ($self) = @_;
  my $temp = $self->{"id"};
  $self->{"id"} = $self->{"entity_credit_id"}; 
- @{$self->{vendor_customer_info}} = $self->exec_method(funcname => 'company_get_billing_info');
+ @{$self->{vendor_customer_info}} = $self->call_dbmethod(funcname => 'company_get_billing_info');
  $self->{"id"} = $temp;
  return ${$self->{vendor_customer_info}}[0];
 }
@@ -549,8 +547,6 @@ sub get_payment_detail_data {
 
     my $source_inc;
     my $source_src;
-    #print STDERR "Use of uninitialized value \$self->{source_start}: $self->{source_start} \n"; 
-    #if ( defined $self->{source_start} ) { print STDERR "Use of uninitialized value \$self->{source_start} is undefined"; } else { print STDERR "Use of uninitialized value \$self->{source_start} is undefined \n"; }
     $self->{source_start} =~ /(\d*)\D*$/;
     $source_src = $1;
     if ($source_src) {
@@ -560,7 +556,7 @@ sub get_payment_detail_data {
     }
     my $source_length = length($source_inc);
    
-    @{$self->{contact_invoices}} = $self->exec_method(
+    @{$self->{contact_invoices}} = $self->call_dbmethod(
 		funcname => 'payment_get_all_contact_invoices');
 
     for my $inv (@{$self->{contact_invoices}}) {
@@ -588,9 +584,10 @@ sub get_payment_detail_data {
         @{$inv->{invoices}} = $self->_parse_array($tmp_invoices);
         @{$inv->{invoices}} = sort { $a->[2] cmp $b->[2] } @{ $inv->{invoices} };
         for my $invoice (@{$inv->{invoices}}){
-            $invoice->[6] = Math::BigFloat->new($invoice->[6]);
-            $invoice->[3] = Math::BigFloat->new($invoice->[3]);
-            $invoice->[4] = Math::BigFloat->new($invoice->[4]);
+            $invoice->[6] = LedgerSMB::PGNumber->new($invoice->[6]);
+            $invoice->[5] = LedgerSMB::PGNumber->new($invoice->[5]);
+            $invoice->[4] = LedgerSMB::PGNumber->new($invoice->[4]);
+            $invoice->[3] = LedgerSMB::PGNumber->new($invoice->[3]);
         }
     }
  
@@ -659,17 +656,17 @@ sub post_bulk {
     my ($self) = @_;
     my $total_count = 0;
     my ($ref) = $self->call_procedure(
-          procname => 'setting_get', 
+          funcname => 'setting_get', 
           args     => ['queue_payments'],
     );
     my $queue_payments = $ref->{setting_get};
     if ($queue_payments){
-        my ($job_ref) = $self->exec_method(
+        my ($job_ref) = $self->call_dbmethod(
                  funcname => 'job__create'
         );
         $self->{job_id} = $job_ref->{job__create};
 
-         ($self->{job}) = $self->exec_method(
+         ($self->{job}) = $self->call_dbmethod(
 		funcname => 'job__status'
          );
     }
@@ -701,11 +698,11 @@ sub post_bulk {
 	$self->{source} = $self->{"source_$contact_id"};
         if ($queue_payments){
              $self->{batch_class} = 3;
-             $self->exec_method(
+             $self->call_dbmethod(
                  funcname => 'payment_bulk_queue'
              );
         } else {
-            $self->exec_method(funcname => 'payment_bulk_post');
+            $self->call_dbmethod(funcname => 'payment_bulk_post');
         }
     }
     $self->{queue_payments} = $queue_payments;
@@ -719,7 +716,7 @@ To be moved into payment_queue addon.
 
 sub check_job {
     my ($self) = @_;
-    ($self->{job}) = $self->exec_method(funcname => 'job__status');
+    ($self->{job}) = $self->call_dbmethod(funcname => 'job__status');
 }
 
 =item post_payment
@@ -740,7 +737,7 @@ sub post_payment {
    if (!$db_exchangerate) {
    # We have to set the exchangerate
   
-   $self->call_procedure(procname => 'payments_set_exchangerate',  args => ["$self->{account_class}", $self->{exrate} ,"$self->{curr}", "$self->{datepaid}"]);
+   $self->call_procedure(funcname => 'payments_set_exchangerate',  args => ["$self->{account_class}", $self->{exrate} ,"$self->{curr}", "$self->{datepaid}"]);
 
 
 
@@ -751,7 +748,12 @@ sub post_payment {
    $self->error($self->{_locale}->text("Exchange rate inconsistency with database.  Got [_1], expected [_2]", $self->{exrate}, $db_exchangerate));
    }
  }
- my @TMParray = $self->exec_method(funcname => 'payment_post');
+ for (@{$self->{amount}}){
+    $_ = $_->bstr if ref $_;
+ }
+ $self->{amount} = [map {ref $_ ? $_->bstr() : $_ } @{$self->{amount}}]
+      if ref $self->{amount};
+ my @TMParray = $self->call_dbmethod(funcname => 'payment_post');
  $self->{payment_id} = $TMParray[0]->{payment_post};
  return $self->{payment_id};
 }
@@ -766,8 +768,8 @@ document and print it. IT IS NECESSARY TO ALREADY HAVE payment_id on $self
 
 sub gather_printable_info {
 my ($self) = @_;
-@{$self->{header_info}} = $self->exec_method(funcname => 'payment_gather_header_info');
-@{$self->{line_info}}   = $self->exec_method(funcname => 'payment_gather_line_info');
+@{$self->{header_info}} = $self->call_dbmethod(funcname => 'payment_gather_header_info');
+@{$self->{line_info}}   = $self->call_dbmethod(funcname => 'payment_gather_line_info');
 for my $row(@{$self->{line_info}}){
     $row->{invoice_date} = $row->{trans_date};
 }
@@ -782,7 +784,7 @@ account_class which have unused overpayments
 
 sub get_open_overpayment_entities {
 my ($self) = @_;
-@{$self->{open_overpayment_entities}} = $self->exec_method(funcname => 'payment_get_open_overpayment_entities');
+@{$self->{open_overpayment_entities}} = $self->call_dbmethod(funcname => 'payment_get_open_overpayment_entities');
 return @{$self->{open_overpayment_entities}}; 
 }
 
@@ -794,7 +796,7 @@ This is a simple wrapper around payment_get_unused_overpayments sql function.
 
 sub get_unused_overpayments {
 my ($self) = @_;
-@{$self->{unused_overpayment}} = $self->exec_method(funcname => 'payment_get_unused_overpayment');
+@{$self->{unused_overpayment}} = $self->call_dbmethod(funcname => 'payment_get_unused_overpayment');
 return @{$self->{unused_overpayment}}; 
 }
 
@@ -806,7 +808,7 @@ Simple wrapper around payment_get_available_overpayment_amount sql function.
 
 sub get_available_overpayment_amount {
 my ($self) = @_;
-@{$self->{available_overpayment_amount}} = $self->exec_method(funcname => 'payment_get_available_overpayment_amount');
+@{$self->{available_overpayment_amount}} = $self->call_dbmethod(funcname => 'payment_get_available_overpayment_amount');
 return @{$self->{available_overpayment_amount}};
 }
 
@@ -816,7 +818,7 @@ return @{$self->{available_overpayment_amount}};
 
 sub overpayment_reverse {
     my ($self, $args) = @_;
-    __PACKAGE__->call_procedure(procname => 'overpayment__reverse',
+    __PACKAGE__->call_procedure(funcname => 'overpayment__reverse',
                                      args => [$args->{id},
                                               $args->{post_date},
                                               $args->{batch_id},
@@ -832,6 +834,8 @@ Initializes the num2text system
 =item num2text
 
 Translates numbers into words.
+
+=back
 
 =cut
 

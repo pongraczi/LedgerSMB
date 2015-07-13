@@ -6,10 +6,11 @@ LedgerSMB::Scripts::business_unit
 
 package LedgerSMB::Scripts::business_unit;
 use LedgerSMB::Business_Unit_Class;
-use LedgerSMB::DBObject::App_Module;
+use LedgerSMB::App_Module;
 use LedgerSMB::Business_Unit;
 use LedgerSMB::Template;
 use LedgerSMB::Setting::Sequence;
+use LedgerSMB::Report::Listings::Business_Unit;
 use Carp;
 
 $Carp::Verbose = 1;
@@ -31,7 +32,7 @@ All functions take a single $request object as their sole argument
 sub list_classes {
     my ($request) = @_;
     my $bu_class = LedgerSMB::Business_Unit_Class->new(%$request);
-    my $lsmb_modules = LedgerSMB::DBObject::App_Module->new(%$request);
+    my $lsmb_modules = LedgerSMB::App_Module->new(%$request);
     @{$request->{classes}} = $bu_class->list;
     @{$request->{modules}} = $lsmb_modules->list;
     my $template = LedgerSMB::Template->new(
@@ -126,38 +127,7 @@ If set, excludes those which are not associated with customers/vendors.
 
 sub list {
     my ($request) = @_;
-    $request->{control_code} = '';
-    $request->{class_id} = 0 unless $request->{class_id} = 0;
-    my $b_unit = LedgerSMB::Business_Unit->new(%$request);
-    my $template = LedgerSMB::Template->new(
-        user =>$request->{_user},
-        locale => $request->{_locale},
-        path => 'UI',
-        template => 'form-dynatable',
-        format => 'HTML'
-    );
-    my $cols;
-    @$cols = qw(id control_code description start_date end_date);
-    my $heading = {
-                  id => $request->{_locale}->text('ID'),
-        control_code => $request->{_locale}->text('Control Code'),
-         description => $request->{_locale}->text('Description'),
-          start_date => $request->{_locale}->text('Start Date'),
-            end_date => $request->{_locale}->text('End Date'),
-    };
-    my $rows;
-    @$rows = $b_unit->list($request->{id}); 
-    my $base_href= "business_unit.pl?action=edit";
-    for $row(@$rows){
-        $row->{control_code} = {text => $row->{control_code},
-                                href => "$base_href&id=$row->{id}"};
-    }
-    $template->render({
-         form    => $request,
-         heading => $heading,
-         rows    => $rows,
-         columns => $cols,
-    });
+    LedgerSMB::Report::Listings::Business_Unit->new(%$request)->render($request);
 }
 
 =item delete
@@ -225,7 +195,7 @@ LedgerSMB::Business_Unit_Class must be set for $request.
 
 sub save_class {
     my ($request) = @_;
-    my $lsmb_modules = LedgerSMB::DBObject::App_Module->new(%$request);
+    my $lsmb_modules = LedgerSMB::App_Module->new(%$request);
     my @modules = $lsmb_modules->list;
     my $modlist = [];
     for my $mod (@modules){

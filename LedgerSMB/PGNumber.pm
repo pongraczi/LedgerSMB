@@ -4,31 +4,59 @@ LedgerSMB::PGNumeric
 
 =cut
 
+
+package LedgerSMB::PGNumber;
+# ensure we're using the GMP library for Math::BigFloat (for speed)
+use Math::BigFloat lib => 'GMP';
+use base qw(PGObject::Type::BigFloat);
 use strict;
 use warnings;
 use Number::Format;
 use LedgerSMB::Setting;
 
-package LedgerSMB::PGNumber;
+PGObject->register_type(pg_type => $_,
+                                  perl_class => __PACKAGE__)
+   for ('float4', 'float8', 'double precision', 'float', 'numeric');
+
 
 =head1 SYNPOSIS
 
 This is a wrapper class for handling a database interface for numeric (int, 
 float, numeric) data types to/from the database and to/from user input.
 
-This extends Math::BigFloat and can be used in this way.
+This extends PBObject::Type::BigFloat which further extends LedgerSMB::PGNumber and 
+can be used in this way.
 
 =head1 INHERITS
 
 =over
 
-=item Math::BigFloat
+=item LedgerSMB::PGNumber
 
 =back
 
 =cut
 
-use base qw(Math::BigFloat);
+=head1 OVERLOADS
+
+=over
+
+=item "bool"
+
+=back
+
+=cut
+
+use overload "bool" => "_bool";
+
+# function to return boolean value based on the numerical value
+# of the BigFloat (zero being false)
+sub _bool {
+    my ($self) = @_;
+
+    return !($self == 0);
+}
+
 
 =head1 SUPPORTED I/O FORMATS
 
@@ -111,6 +139,7 @@ The input is formatted.
 sub from_input {
     my $self   = shift @_;
     my $string = shift @_;
+    return $string if eval { $string->isa(__PACKAGE__) };
     #tshvr4 avoid 'Use of uninitialized value $string in string eq'
     if(!defined $string || $string eq ''){
      return undef;
@@ -129,7 +158,7 @@ sub from_input {
     {    
         return $string;
     }
-    if (UNIVERSAL::isa( $string, 'Math::BigFloat' ) ) {
+    if (UNIVERSAL::isa( $string, 'LedgerSMB::PGNumber' ) ) {
         $pgnum = $string; 
     } else {
         my $formatter = new Number::Format(
@@ -137,7 +166,7 @@ sub from_input {
                     -decimal_point => $lsmb_formats->{$format}->{decimal_sep},
         );
         $newval = $formatter->unformat_number($string);
-        $pgnum = Math::BigFloat->new($newval);
+        $pgnum = LedgerSMB::PGNumber->new($newval);
         $self->round_mode('+inf');
     } 
     bless $pgnum, $self;
@@ -211,31 +240,22 @@ sub to_output {
     }
 
     my $neg_format = ($args{neg_format}) ? $args{neg_format} : 'def';
+    $neg_format = 'def' unless $lsmb_neg_formats->{$neg_format};
     my $fmt = ($is_neg) ? $lsmb_neg_formats->{$neg_format}->{neg}
                         : $lsmb_neg_formats->{$neg_format}->{pos};
    
     return sprintf($fmt, $str);
 }
 
-=item from_db
+=item to_sort
+
+Returns the value for sorting purposes
 
 =cut
 
-sub from_db {
-    my ($self, $string) = @_;
-    return undef if !defined $string;
-    return $self->new($string);
+sub to_sort {
+    return $_[0]->bstr;
 }
-
-=item to_db
-
-=cut
-
-sub to_db {
-    my ($self) = @_; 
-    return $self->to_output({format => '1000.00'});
-}
-
 
 1;
 

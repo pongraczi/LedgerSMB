@@ -30,10 +30,13 @@ our @io_lineitem_columns = qw(unit onhand sellprice discount linetotal);
 # Whitelist for redirect destination
 #
 our @newscripts = qw(
-     account.pl  customer.pl  inventory.pl  payment.pl  user.pl
-admin.pl    drafts.pl    journal.pl    recon.pl    vendor.pl
-asset.pl    employee.pl  login.pl      setup.pl    vouchers.pl
-file.pl      menu.pl       taxform.pl);
+   account.pl admin.pl asset.pl budget_reports.pl budgets.pl business_unit.pl
+   configuration.pl contact.pl contact_reports.pl document_series.pl drafts.pl
+   file.pl goods.pl import_csv.pl inventory.pl invoice.pl inv_reports.pl
+   journal.pl login.pl lreports_co.pl menu.pl order.pl payment.pl payroll.pl
+   pnl.pl recon.pl report_aging.pl reports.pl setup.pl taxform.pl template.pl
+   timecard.pl transtemplate.pl trial_balance.pl user.pl vouchers.pl
+);
 
 our @scripts = (
     'aa.pl', 'am.pl',      'ap.pl',
@@ -77,6 +80,7 @@ our $smtptimout = 60;
 our $smtpuser   = '';
 our $smtppass   = '';
 our $smtpauthmethod = '';
+our $zip = 'zip -r %dir %dir';
 
 # set language for login and admin
 our $language = "en";
@@ -129,8 +133,8 @@ for my $var (qw(localepath spool templates images)) {
 }
 
 # Programs
-for my $var (qw(gzip)) {
-    ${$var} = $cfg->val('prigrams', $var) if $cfg->val('prigrams', $var);
+for my $var (qw(gzip zip)) {
+    ${$var} = $cfg->val('programs', $var) if $cfg->val('programs', $var);
 }
 
 # mail configuration
@@ -186,7 +190,6 @@ our $log4perl_config = qq(
 #log4perl.logger.LedgerSMB.Handler = ERROR
 #log4perl.logger.LedgerSMB.User = WARN
 #log4perl.logger.LedgerSMB.ScriptLib.Company=TRACE
-#print STDERR localtime()." Sysconfig log4perl_config=$log4perl_config\n";
 
 our $db_host = $cfg->val('database', 'host');
 our $db_port = $cfg->val('database', 'port');

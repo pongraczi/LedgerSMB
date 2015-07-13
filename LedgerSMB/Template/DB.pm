@@ -6,7 +6,9 @@ LedgerSMB::Template::DB - Template administration functions for LedgerSMB
 
 package LedgerSMB::Template::DB;
 use Moose;
-with 'LedgerSMB::DBObject_Moose', 'LedgerSMB::I18N';
+with 'LedgerSMB::PGObject', 'LedgerSMB::I18N';
+
+use LedgerSMB::App_State;
 
 =head1 SYNPOPSIS
 
@@ -62,12 +64,12 @@ Returns a scalar ref to the template text so that Template Toolkit can run it.
 sub get_template {
     my ($module, $template_name, $language_code, $format) = @_;
     my ($temp) = __PACKAGE__->call_procedure(
-         procname => 'template__get',
+         funcname => 'template__get',
          args => [$template_name, $language_code, $format]
     );
-    $temp = __PACKAGE__->new($temp);
-    my $text = $temp->template;
+    my $text = $temp->{template};
     die text('Could Not Load Template from DB') unless $text;
+    $temp = __PACKAGE__->new($temp);
     return \$text;
 }
 
@@ -80,7 +82,7 @@ Gets the template by ID.  Returns a whole template object.
 sub get_by_id {
     my ($module, $id) = @_;
     my ($temp) = __PACKAGE__->call_procedure(
-         procname => 'template__get_by_id',
+         funcname => 'template__get_by_id',
          args => [$id]
     );
     return __PACKAGE__->new(%$temp);
@@ -107,10 +109,10 @@ sub get {
     my $module = shift @_;
     my %args = @_;
     my ($temp) = __PACKAGE__->call_procedure(
-         procname => 'template__get',
+         funcname => 'template__get',
          args => [$args{template_name}, $args{language_code}, $args{format}]
     );
-    return undef unless $temp->{format};  # allows editing of blank templates
+    die text('Could Not Load Template from DB') unless $temp;
     return __PACKAGE__->new(%$temp);
 }
 
@@ -154,7 +156,7 @@ Saves the current object
 
 sub save {
     my ($self) = @_;
-    $self->exec_method(funcname => 'template__save');
+    $self->call_dbmethod(funcname => 'template__save');
 }
 
 =head1 COPYRIGHT

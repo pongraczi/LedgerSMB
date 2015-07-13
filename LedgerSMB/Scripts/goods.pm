@@ -6,6 +6,8 @@ LedgerSMB::Scripts::goods - Goods and Services workflows for LedgerSMB
 
 package LedgerSMB::Scripts::goods;
 use LedgerSMB::Report::Inventory::Search;
+use LedgerSMB::Report::Inventory::History;
+use LedgerSMB::Report::Invoices::COGS;
 use LedgerSMB::Scripts::reports;
 use LedgerSMB::Report::Inventory::Partsgroups;
 use LedgerSMB::Report::Inventory::Pricegroups;
@@ -27,7 +29,7 @@ use LedgerSMB::Report::Inventory::Activity;
 sub search_screen {
     my ($request) = @_;
     $request->{partsgroups} = $request->call_procedure(
-       procname => 'partsgroup__search', args => [undef]
+       funcname => 'partsgroup__search', args => [undef]
     );
     $request->{report_name} = 'search_goods';
     LedgerSMB::Scripts::reports::start_report($request);
@@ -39,6 +41,12 @@ sub search_screen {
 
 sub search {
     my ($request) = @_;
+    for (qw(so po is ir quo rfq)){
+       $request->{col_ordnumber} = 1;
+       return LedgerSMB::Report::Inventory::History->new(%$request)
+              ->render($request)
+               if ($request->{"inc_$_"});
+    }
     my $report = LedgerSMB::Report::Inventory::Search->new(%$request);
     $report->render($request);
 };
@@ -79,6 +87,17 @@ sub inventory_activity {
     my ($request) = @_;
     my $report = LedgerSMB::Report::Inventory::Activity->new(%$request);
     $report->render($request);
+}
+
+=item cogs_lines
+
+Runs the cogs lines report.
+
+=cut
+
+sub cogs_lines {
+    my ($request) = shift;
+    LedgerSMB::Report::Invoices::COGS->new(%$request)->render($request);
 }
 
 =back

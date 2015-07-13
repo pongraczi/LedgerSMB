@@ -39,28 +39,26 @@ Displays the preferences screen.  No inputs needed.
 =cut
 
 sub preference_screen {
-    my ($request) = @_;
-    my $user = LedgerSMB::DBObject::User->new({base => $request});
+    my ($request, $user) = @_;
+    if (! defined $user) {
+        $user = LedgerSMB::DBObject::User->new({base => $request});
+        $user->get($user->{_user}->{id});
+    }
     $user->get_option_data;
 
-    for my $format(@{$user->{dateformats}}){
-        $format->{id} = $format->{format};
-        $format->{id} =~ s/\//$slash/g;
-    }
-
-    $user->{dateformat} = $user->{_user}->{dateformat};
-    $user->{dateformat} =~ s/\//$slash/g;
-     
     my $template = LedgerSMB::Template->new(
-            user     =>$request->{_user}, 
+            user     => $user, 
             locale   => $request->{_locale},
             path     => 'UI/users',
             template => 'preferences',
 	    format   => 'HTML'
     );
-    $user->{user} = $request->{_user};
+
+    my $creds = LedgerSMB::Auth::get_credentials();
+    $user->{login} = $creds->{login};
     $user->{password_expires} =~ s/:(\d|\.)*$//;
-    $template->render($user);
+    $template->render({ request => $request,
+                        user => $user });
 }
 
 =item save_preferences
@@ -81,8 +79,8 @@ sub save_preferences {
     if ($user->{confirm_password}){
         $user->change_my_password;
     }
-    $user->save_preferences;
-    preference_screen($user);
+    $user = $user->save_preferences;
+    preference_screen($request, $user);
 }
 
 =item change_password
@@ -99,7 +97,7 @@ sub change_password {
     if ($user->{confirm_password}){
         $user->change_my_password;
     }
-    preference_screen($user);
+    preference_screen($request, $user);
 }
 
 =back

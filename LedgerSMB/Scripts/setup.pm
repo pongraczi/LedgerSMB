@@ -9,6 +9,8 @@ management tasks.
 
 =head1 METHODS
 
+=over
+
 =cut
 
 # DEVELOPER NOTES:
@@ -26,9 +28,22 @@ use LedgerSMB::Upgrade_Tests;
 use LedgerSMB::Sysconfig;
 use LedgerSMB::Template::DB;
 use LedgerSMB::Setting;
+use Try::Tiny;
 use strict;
 
 my $logger = Log::Log4perl->get_logger('LedgerSMB::Scripts::setup');
+
+=item no_db
+
+Existence of this sub causes requests passed to this module /not/ to be
+pre-connected to the database.
+
+=cut
+
+sub no_db {
+    return 1;
+}
+
 
 sub __default {
 
@@ -46,9 +61,9 @@ sub _get_database {
     my $creds = LedgerSMB::Auth::get_credentials('setup');
 
     return LedgerSMB::Database->new(
-               {username => $creds->{login},
-            company_name => $request->{database},
-                password => $creds->{password} }
+                username => $creds->{login},
+                password => $creds->{password},
+                  dbname => $request->{database},
     );
 }
 
@@ -56,13 +71,12 @@ sub _get_database {
 sub _init_db {
     my ($request) = @_;
     my $database = _get_database($request);
-    $request->{dbh} = $database->dbh()
+    $request->{dbh} = $database->connect()
 	if ! defined $request->{dbh};
+    $LedgerSMB::App_State::DBH = $request->{dbh};
 
     return $database;
 }
-
-=over
 
 =item login
 
@@ -135,6 +149,7 @@ sub login {
     my $version_info = $database->get_info();
 
     _init_db($request);
+    sanity_checks($database);
     $request->{login_name} = $version_info->{username};
     if ($version_info->{status} eq 'does not exist'){
         $request->{message} = $request->{_locale}->text(
@@ -168,7 +183,7 @@ sub login {
 	} elsif ($request->{next_action} eq 'rebuild_modules') {
             # we found the current version
             # check we don't have stale migrations around
-            my $dbh = $database->dbh();
+            my $dbh = $database->connect();
             my $sth = $dbh->prepare(qq(
                 SELECT count(*)<>0
                   FROM defaults
@@ -192,6 +207,18 @@ sub login {
 
 }
 
+=item sanity_checks
+Checks for common setup issues and errors if admin tasks cannot be completed/
+
+=cut
+
+sub sanity_checks {
+    my ($database) = @_;
+    `psql --help` || die LedgerSMB::App_State::Locale->text(
+                                 'psql not found.'
+                              );
+}
+
 =item list_databases
 Lists all databases as hyperlinks to continue operations.
 
@@ -200,7 +227,7 @@ Lists all databases as hyperlinks to continue operations.
 sub list_databases {
     my ($request) = @_;
     my $database = _get_database($request);
-    my @results = $database->list;
+    my @results = $database->list_dbs;
     $request->{dbs} = [];
     for my $r (@results){
        push @{$request->{dbs}}, {row_id => $r, db => $r };
@@ -224,6 +251,13 @@ sub copy_db {
     my $database = _get_database($request);
     my $rc = $database->copy($request->{new_name}) 
            || die 'An error occurred. Please check your database logs.' ;
+    my $dbh = LedgerSMB::Database->new(
+           {%$database, (company_name => $request->{new_name})}
+    )->connect;
+    $dbh->prepare("SELECT setting__set('role_prefix', 
+                               coalesce((setting_get('role_prefix')).value, ?))"
+    )->execute("lsmb_$database->{company_name}__");
+    $dbh->disconnect;
     complete($request);
 }
 
@@ -280,10 +314,20 @@ sub run_backup {
     my $mimetype;
 
     if ($request->{backup} eq 'roles'){
-       $backupfile = $database->base_backup; 
+       my @t = localtime(time);
+       $t[4]++;
+       $t[5] += 1900;
+       $t[3] = substr( "0$t[3]", -2 );
+       $t[4] = substr( "0$t[4]", -2 );
+       my $date = "$t[5]-$t[4]-$t[3]";
+
+       $backupfile = $database->backup_globals(
+                      tempdir => $LedgerSMB::Sysconfig::backuppath,
+                         file => "roles_${date}.sql"
+       );
        $mimetype   = 'text/x-sql';
     } elsif ($request->{backup} eq 'db'){
-       $backupfile = $database->db_backup;
+       $backupfile = $database->backup;
        $mimetype   = 'application/octet-stream';
     } else {
         $request->error($request->{_locale}->text('Invalid backup request'));
@@ -301,7 +345,7 @@ sub run_backup {
 	);
 	$mail->attach(
             mimetype => $mimetype,
-            filename => $backupfile,
+            filename => 'ledgersmb-backup.sqlc',
             file     => $backupfile,
 	);        $mail->send;
         unlink $backupfile;
@@ -320,7 +364,7 @@ sub run_backup {
           -type       => $mimetype,
           -status     => '200',
           -charset    => 'utf-8',
-          -attachment => $backupfile,
+          -attachment => 'ledgersmb-backup-' . time . ".sqlc",
         );
         my $data;
         while (read(BAK, $data, 1024 * 1024)){ # Read 1MB at a time
@@ -340,7 +384,8 @@ sub run_backup {
 sub revert_migration {
     my ($request) = @_;
     my $database = _get_database($request);
-    my $dbh = $database->dbh();
+    my $dbh = $database->connect();
+    $dbh->{AutoCommit} = 0;
     my $sth = $dbh->prepare(qq(
          SELECT value
            FROM defaults
@@ -353,7 +398,6 @@ sub revert_migration {
     $dbh->do("DROP SCHEMA public CASCADE");
     $dbh->do("ALTER SCHEMA $src_schema RENAME TO public");
     $dbh->commit();
-    #$dbh->begin_work; # no need to begin work; there's no further work
     
     my $template = LedgerSMB::Template->new(
         path => 'UI/setup',
@@ -414,14 +458,14 @@ and not the user creation screen.
 sub load_templates {
     my ($request) = @_;
     my $dir = $LedgerSMB::Sysconfig::templates . '/' . $request->{template_dir};
-    my $dbh = _get_database($request)->dbh;
+    _init_db($request);
+    my $dbh = $request->{dbh};
     opendir(DIR, $dir);
     while (readdir(DIR)){
        next unless -f "$dir/$_";
        my $dbtemp = LedgerSMB::Template::DB->get_from_file("$dir/$_");
        $dbtemp->save;
     }
-    $dbh->commit;
     return _render_new_user($request) unless $request->{only_templates};
     return complete($request);
 }
@@ -677,7 +721,7 @@ sub create_db {
     my $rc=0;
 
     my $database = _get_database($request);
-    $rc=$database->create_and_load();#TODO what if createdb fails?
+    $rc=$database->create_and_load();
     $logger->info("create_and_load rc=$rc");
 
     select_coa($request);
@@ -717,7 +761,7 @@ sub select_coa {
             opendir(CHART, "sql/coa/$request->{coa_lc}/chart");
             @{$request->{charts}} =
                 map +{ name => $_ },
-                sort (grep !/^(\.|[Ss]ample.*)/,
+                sort(grep !/^(\.|[Ss]ample.*)/,
                       readdir(CHART));
             closedir(CHART);
        }
@@ -785,10 +829,10 @@ sub _render_new_user {
     $request->{dbh}->{AutoCommit} = 0;
 
     @{$request->{salutations}} 
-    = $request->call_procedure(procname => 'person__list_salutations' ); 
+    = $request->call_procedure(funcname => 'person__list_salutations' ); 
     
     @{$request->{countries}} 
-    = $request->call_procedure(procname => 'location_list_country' ); 
+    = $request->call_procedure(funcname => 'location_list_country' ); 
     for my $country (@{$request->{countries}}){
         if (lc($request->{coa_lc}) eq lc($country->{short_name})){
            $request->{country_id} = $country->{id};
@@ -836,43 +880,51 @@ sub save_user {
     $emp->save;
     $request->{entity_id} = $emp->entity_id;
     my $user = LedgerSMB::Entity::User->new(%$request);
-    if (8 == $user->create){ # Told not to import but user exists in db
-        $request->{notice} = $request->{_locale}->text(
+    my $duplicate = 0;
+    try { $user->create }
+    catch {
+        if ($_ =~ /duplicate user/i){
+           $duplicate = 1;
+           $request->{notice} = $request->{_locale}->text(
                        'User already exists. Import?'
-        );
+            );
+           $request->{pls_import} = 1;
 
+           @{$request->{salutations}} 
+            = $request->call_procedure(funcname => 'person__list_salutations' );
+         
+           @{$request->{countries}} 
+              = $request->call_procedure(funcname => 'location_list_country' ); 
 
-       @{$request->{salutations}} 
-        = $request->call_procedure(procname => 'person__list_salutations' ); 
-          
-       @{$request->{countries}} 
-        = $request->call_procedure(procname => 'location_list_country' ); 
+           my $locale = $request->{_locale};
 
-       my $locale = $request->{_locale};
-
-       @{$request->{perm_sets}} = (
-           {id => '0', label => $locale->text('Manage Users')},
-           {id => '1', label => $locale->text('Full Permissions')},
-       );
-        my $template = LedgerSMB::Template->new(
+           @{$request->{perm_sets}} = (
+               {id => '0', label => $locale->text('Manage Users')},
+               {id => '1', label => $locale->text('Full Permissions')},
+           );
+           my $template = LedgerSMB::Template->new(
                 path => 'UI/setup',
                 template => 'new_user',
-         format => 'HTML',
-        );
-        $template->render($request);
-        return;
-    }
+                format => 'HTML',
+           );
+           $template->render($request);
+           return;
+       } else {
+           die $_;
+       }
+    };
+    return if $duplicate;
     if ($request->{perms} == 1){
          for my $role (
-                $request->call_procedure(procname => 'admin__get_roles')
+                $request->call_procedure(funcname => 'admin__get_roles')
          ){
-             $request->call_procedure(procname => 'admin__add_user_to_role',
+             $request->call_procedure(funcname => 'admin__add_user_to_role',
                                       args => [ $request->{username}, 
                                                 $role->{rolname}
                                               ]);
          }
     } elsif ($request->{perms} == 0) {
-        $request->call_procedure(procname => 'admin__add_user_to_role',
+        $request->call_procedure(funcname => 'admin__add_user_to_role',
                                  args => [ $request->{username},
                                            "lsmb_$request->{database}__".
                                             "users_manage",
@@ -894,7 +946,8 @@ sub save_user {
 
 sub process_and_run_upgrade_script {
     my ($request, $database, $src_schema, $template) = @_;
-    my $dbh = $database->dbh;
+    my $dbh = $database->connect;
+    $dbh->{AutoCommit} = 0;
     my $temp = $database->loader_log_filename();
     my $rc;
 
@@ -1025,10 +1078,10 @@ sub create_initial_user {
 
    my $database = _init_db($request) unless $request->{dbh};
    @{$request->{salutations}} 
-    = $request->call_procedure(procname => 'person__list_salutations' ); 
+    = $request->call_procedure(funcname => 'person__list_salutations' ); 
           
    @{$request->{countries}} 
-    = $request->call_procedure(procname => 'location_list_country' ); 
+    = $request->call_procedure(funcname => 'location_list_country' ); 
 
    my $locale = $request->{_locale};
 
@@ -1065,25 +1118,11 @@ between versions on a stable branch (typically upgrading)
 sub rebuild_modules {
     my ($request) = @_;
     my $database = _init_db($request);
-    my $temp = $database->loader_log_filename();
-    $request->{dbh}->{AutoCommit} = 0;
 
-    $database->load_modules('LOADORDER', {
-	log     => $temp . "_stdout",
-	errlog  => $temp . "_stderr"
-			    });
+    $database->upgrade_modules('LOADORDER', $LedgerSMB::VERSION)
+        or die "Upgrade failed.";
 
-    my $dbh = $request->{dbh};
-    my $sth = $dbh->prepare(
-          'UPDATE defaults SET value = ? WHERE setting_key = ?'
-    );
-    $sth->execute($request->{dbversion}, 'version');
-    $sth->finish;
-    $dbh->commit;
-    #$dbh->begin_work; no need to start a new transaction; no further work
-    #$dbh->disconnect;#upper stack will disconnect
     complete($request);
-
 }
 
 =item complete 
@@ -1096,7 +1135,7 @@ sub complete {
     my ($request) = @_;
     my $database = _init_db($request);
     my $temp = $database->loader_log_filename();
-    $request->{lsmb_info} = $database->lsmb_info();
+    $request->{lsmb_info} = $database->stats();
     my $template = LedgerSMB::Template->new(
             path => 'UI/setup',
             template => 'complete',

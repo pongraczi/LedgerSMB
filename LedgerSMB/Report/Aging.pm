@@ -74,10 +74,13 @@ sub columns {
     my ($self) = @_;
     our @COLUMNS = ();
     my $credit_label;
+    my $base_href;
     if ($self->entity_class == 1) {
         $credit_label = LedgerSMB::Report::text('Vendor');
+        $base_href = 'ap.pl?action=edit&id='; # for details
     } elsif ($self->entity_class == 2){
         $credit_label = LedgerSMB::Report::text('Customer');
+        $base_href = 'ar.pl?action=edit&id='; # for details
     }
     push @COLUMNS,
       {col_id => 'select',
@@ -98,7 +101,7 @@ sub columns {
           {col_id => 'invnumber',
              name => LedgerSMB::Report::text('Invoice'),
              type => 'href',
-        href_base => '',
+        href_base => $base_href,
            pwidth => '3', },
 
           {col_id => 'ordnumber',
@@ -239,7 +242,15 @@ has 'date_ref' => (is => 'rw', coerce => 1, isa => 'LedgerSMB::Moose::Date');
 
 =cut
 
-has 'entity_class' => (is => 'rw', isa => 'Maybe[Int]');
+has 'entity_class' => (is => 'ro', isa => 'Maybe[Int]');
+
+=item entity_id
+
+Customer/Vendor entity id
+
+=cut
+
+has entity_id => (is => 'ro', isa => 'Maybe[Int]');
 
 =back
 
@@ -255,10 +266,14 @@ Runs the report, and assigns rows to $self->rows.
 
 sub run_report{
     my ($self) = @_;
-    my @rows = $self->exec_method({funcname => 'report__invoice_aging_' .
-                                                $self->report_type});
+    my @rows = $self->call_dbmethod(funcname => 'report__invoice_aging_' .
+                                                $self->report_type);
     for my $row(@rows){
-        $row->{row_id} = "$row->{account_number}:$row->{entity_id}";
+        if ($self->report_type eq 'detail') {
+            $row->{row_id} = $row->{id};
+        } else {
+            $row->{row_id} = "$row->{account_number}:$row->{entity_id}";
+        }
         $row->{total} = $row->{c0} + $row->{c30} + $row->{c60} + $row->{c90};
     }
     $self->rows(\@rows);

@@ -30,14 +30,18 @@ CREATE TYPE person_entity AS (
     country_name text,
     first_name text,
     middle_name text,
-    last_name text
+    last_name text,
+    entity_class int,
+    birthdate date,
+    personal_id text
 );
 
 CREATE FUNCTION person__get(in_entity_id int)
 RETURNS person_entity AS
 $$
 SELECT e.id, e.control_code, e.name, e.country_id, c.name, 
-       p.first_name, p.middle_name, p.last_name
+       p.first_name, p.middle_name, p.last_name, e.entity_class,
+       p.birthdate, p.personal_id
   FROM entity e
   JOIN country c ON c.id = e.country_id
   JOIN person p ON p.entity_id = e.id
@@ -48,7 +52,8 @@ CREATE FUNCTION person__get_by_cc(in_control_code text)
 RETURNS person_entity AS
 $$
 SELECT e.id, e.control_code, e.name, e.country_id, c.name, 
-       p.first_name, p.middle_name, p.last_name
+       p.first_name, p.middle_name, p.last_name, e.entity_class,
+       p.birthdate, p.personal_id
   FROM entity e
   JOIN country c ON c.id = e.country_id
   JOIN person p ON p.entity_id = e.id
@@ -62,10 +67,11 @@ $$ SELECT * FROM salutation ORDER BY id ASC $$ language sql;
 COMMENT ON FUNCTION person__list_salutations() IS
 $$ Returns a list of salutations ordered by id.$$; 
 
+DROP FUNCTION IF EXISTS person__save (int, int, text, text, text, int);
 CREATE OR REPLACE FUNCTION person__save
 (in_entity_id integer, in_salutation_id int, 
 in_first_name text, in_middle_name text, in_last_name text,
-in_country_id integer
+in_country_id integer, in_birthdate date, in_personal_id text
 )
 RETURNS INT AS $$
 
@@ -97,7 +103,9 @@ RETURNS INT AS $$
             salutation_id = in_salutation_id,
             first_name = in_first_name,
             last_name = in_last_name,
-            middle_name = in_middle_name
+            middle_name = in_middle_name,
+            birthdate = in_birthdate,
+            personal_id = in_personal_id
     WHERE
             entity_id = in_entity_id;
     IF FOUND THEN
@@ -105,8 +113,10 @@ RETURNS INT AS $$
     ELSE 
         -- Do an insert
         
-        INSERT INTO person (salutation_id, first_name, last_name, entity_id)
-	VALUES (in_salutation_id, in_first_name, in_last_name, e_id);
+        INSERT INTO person (salutation_id, first_name, last_name, entity_id,
+                           birthdate, personal_id)
+	VALUES (in_salutation_id, in_first_name, in_last_name, e_id,
+                in_birthdate, in_personal_id);
 
         RETURN e_id;
     
@@ -117,7 +127,7 @@ $$ language plpgsql;
 COMMENT ON FUNCTION person__save
 (in_entity_id integer, in_salutation_id int, 
 in_first_name text, in_middle_name text, in_last_name text,
-in_country_id integer
+in_country_id integer, in_birthdate date, in_personal_id text
 ) IS
 $$ Saves the person with the information specified.  Returns the entity_id
 of the record saved.$$;
@@ -132,7 +142,7 @@ BEGIN
 			l.state, l.mail_code, c.id, c.name, lc.id, lc.class
 		FROM location l
 		JOIN entity_to_location ctl ON (ctl.location_id = l.id)
-		JOIN person p ON (ctl.person_id = p.entity_id)
+		JOIN person p ON (ctl.entity_id = p.entity_id)
 		JOIN location_class lc ON (ctl.location_class = lc.id)
 		JOIN country c ON (c.id = l.country_id)
 		WHERE p.entity_id = in_entity_id
@@ -155,7 +165,7 @@ BEGIN
 		SELECT cc.class, cc.id, c.description, c.contact
 		FROM entity_to_contact c
 		JOIN contact_class cc ON (c.contact_class_id = cc.id)
-		JOIN person p ON (c.person_id = p.entity_id)
+		JOIN person p ON (c.entity_id = p.entity_id)
 		WHERE p.entity_id = in_entity_id
 	LOOP
 		RETURN NEXT out_row;
@@ -173,7 +183,7 @@ returns bool as $$
 BEGIN
 
 DELETE FROM entity_to_contact
- WHERE person_id = (SELECT entity_id FROM person WHERE id = in_person_id) 
+ WHERE entity_id = (SELECT entity_id FROM person WHERE id = in_person_id) 
        and contact_class_id = in_contact_class_id
        and contact= in_contact;
 RETURN FOUND;
@@ -274,7 +284,7 @@ $$
 BEGIN
 
 DELETE FROM entity_to_location
- WHERE person_id = (select entity_id from person where id = in_person_id) 
+ WHERE entity_id = (select entity_id from person where id = in_person_id) 
        AND location_id = in_location_id 
        AND location_class = in_location_class;
 

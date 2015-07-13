@@ -99,6 +99,8 @@ sub columns {
     ];
 }
 
+=back
+
 =head2 set_buttons
 
 This sets buttons relevant to approving the adjustments.
@@ -121,21 +123,17 @@ sub set_buttons {
     }];
 }
 
-=back
-
 =head1 METHODS
 
-=over
-
-=item run_report
+=head2 run_report
 
 =cut
 
 sub run_report {
     my ($self) = @_;
-    my ($rpt) = $self->exec_method({funcname => 'inventory_adj__get'});
+    my ($rpt) = $self->call_dbmethod(funcname => 'inventory_adj__get');
     $self->source($rpt->{source});
-    my @rows = $self->exec_method({funcname => 'inventory_adj__details'});
+    my @rows = $self->call_dbmethod(funcname => 'inventory_adj__details');
     for my $row (@rows){
         $row->{row_id} = $row->{parts_id}; 
     }
@@ -207,7 +205,7 @@ sub approve {
     ## Posting
     IS->post_invoice({}, $form_ar);
     IR->post_invoice({}, $form_ap);
-    $self->call_procedure(procname => 'inventory_report__approve',
+    $self->call_procedure(funcname => 'inventory_report__approve',
        args => [$self->id, $form_ar->{id}, $form_ap->{ap}]
     );
 }
@@ -220,10 +218,8 @@ Deletes the inventory report
 
 sub delete {
     my ($self) = @_;
-    $self->exec_method(funcname => 'inventory_report__delete');
+    $self->call_dbmethod(funcname => 'inventory_report__delete');
 }
-
-=back
 
 =head1 SEE ALSO
 

@@ -80,7 +80,8 @@ admin users.
 
 =cut
 
-our @COLUMNS = (
+sub columns {
+    return [
     {col_id => 'accno',
        name => LedgerSMB::Report::text('Account Number'),
        type => 'href',
@@ -93,7 +94,7 @@ our @COLUMNS = (
   href_base => '',
      pwidth => '6', },
 
-    {col_id => 'gifi_accno',
+    {col_id => 'gifi',
        name => LedgerSMB::Report::text('GIFI'),
        type => 'text',
      pwidth => '1', },
@@ -126,11 +127,7 @@ our @COLUMNS = (
        type => 'href',
   href_base => '',
   html_only => '1', },
-
-);
-
-sub columns {
-    return \@COLUMNS;
+  ];
 }
 
 =item name
@@ -181,7 +178,7 @@ Runs the report, and assigns rows to $self->rows.
 
 sub run_report{
     my ($self) = @_;
-    my @rows = $self->exec_method({funcname => 'report__coa'});
+    my @rows = $self->call_dbmethod(funcname => 'report__coa');
     for my $r(@rows){
         my $ct; 
         if ($r->{is_heading}){
@@ -191,18 +188,18 @@ sub run_report{
         }
         $r->{edit} = '['.LedgerSMB::Report::text('Edit').']';
         $r->{delete} = '['.LedgerSMB::Report::text('Delete').']' 
-                  if !$r->{rowcount} and !$r->{is_heading};
+                  if !$r->{rowcount};
         $r->{edit_href_suffix} = 'account.pl?action=edit&id='.$r->{id} . 
            "&charttype=$ct";
-        $r->{delete_href_suffix} = 'journal.pl?action=delete_account&id='.$r->{id} .
-           "&charttype=$ct";
+        $r->{delete_href_suffix} = 'journal.pl?action=delete_account&id='
+	    . $r->{id} . "&charttype=$ct";
         $r->{accno_href_suffix} = 
                 'reports.pl?action=start_report&module_name=gl&report_name=gl' .
                 "&accno=$r->{accno}--$r->{description}" 
                      unless $r->{is_heading};
         $r->{description_href_suffix} = $r->{accno_href_suffix};
         $r->{html_class} = 'listheading' if $r->{is_heading};
-        $r->{link} =~ s/:/\n/g;
+        $r->{link} =~ s/:/\n/g if $r->{link};
     }
     $self->rows(\@rows);
 }

@@ -71,7 +71,7 @@ sub _get_from_date {
         my $date_string = $self->from_year . "-" .  $self->from_month . '-01';
         return LedgerSMB::PGDate->from_db($date_string, 'date');
     } else {
-        my ($ref) = $self->exec_method({funcname => 'lsmb__min_date'});
+        my ($ref) = $self->call_dbmethod(funcname => 'lsmb__min_date');
         if ($ref->{lsmb__min_date}){
             return LedgerSMB::PGDate->from_db($ref->{lsmb__min_date}, 'date');
         } else {
@@ -84,7 +84,7 @@ sub _get_from_date {
 sub _get_to_date {
     my ($self) = @_;
     if (!$self->from_month or !$self->from_year or $self->interval eq 'none'){
-        my ($ref) = $self->exec_method({funcname => 'lsmb__max_date'});
+        my ($ref) = $self->call_dbmethod(funcname => 'lsmb__max_date');
         if ($ref->{lsmb__max_date}){
              return LedgerSMB::PGDate->from_db($ref->{lsmb__max_date}, 'date');
         } else {
@@ -95,13 +95,13 @@ sub _get_to_date {
     my $dateobj = $self->from_date;
     my $date = $dateobj->from_db($dateobj->to_db, 'date'); # copy, round trip
     if ($self->interval eq 'month'){
-       $date->date->add(months => 1);
+       $date->add(months => 1);
     } elsif ($self->interval eq 'quarter'){
-       $date->date->add(months => 3);
+       $date->add(months => 3);
     } elsif ($self->interval eq 'year'){
-       $date->date->add(years => 1);
+       $date->add(years => 1);
     }
-    $date->date->subtract(days => 1); # dates are inclusive
+    $date->subtract(days => 1); # dates are inclusive
     return $date;
 }
 

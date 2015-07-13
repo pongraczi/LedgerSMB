@@ -1,21 +1,45 @@
 <?lsmb INCLUDE 'ui-header.html' stylesheet=request.stylesheet 
          include_stylesheet = ['UI/Reports/pnl.css']; 
+FORMATS = LIST_FORMATS();
+
+PROTO='http';
+
+IF (ENVARS.SERVER_PORT == '443') or 
+   (ENVARS.HTTPS and ENVARS.HTTPS != 'OFF'); 
+   PROTO='https'; 
+END;
+
+SERVER = ENVARS.SERVER_NAME;
+
+IF (ENVARS.SERVER_PORT != '80') and ENVARS.SERVER_PORT
+                                and (ENVARS.SERVER_PORT != '443');
+   SERVER = SERVER _ ':' _ ENVARS.SERVER_PORT;
+END;
+
+QSTR=ENVARS.QUERY_STRING;
+
+LINK = PROTO _ '://' _ SERVER _ ENVARS.SCRIPT_NAME 
+           _ '?' _ QSTR _ '&' _ 'company=' _ DBNAME;
+
+LINK = LINK.replace('\&\&', '&');
+
  comparisons = report.comparisons ?>
-<body class="financial-statement" id="balance-sheet">
+<body class="financial-statement <?lsmb dojo_theme ?>">
+<div id="PNL"> <!-- TODO: Find better name!! -->
 <h1><?lsmb text('Balance Sheet') ?></h1>
 <?lsmb # TODO:  header hierarchy handling ?>
 <table>
 <tr class="report-head">
-<th colspan="2"><?lsmb text('Through date:') _ ' ' _ report.to_date ?></th>
+<td colspan="2"><h2><?lsmb text('Through date:') _ ' ' _ report.to_date ?></h2></td>
 <?lsmb FOREACH c IN comparisons ?>
-<th><?lsmb c.to_date ?></th>
+<td><?lsmb c.to_date ?></td>
 <?lsmb END; ?>
-<tr class="section-head">
+<tr class="sectionhead">
    <th colspan="2"><?lsmb text('Assets') ?></th>
 </tr>
 <?lsmb FOREACH line IN report.balance_sheet.A.lines ?> 
-<tr><th><a href="journal.pl?action=search&to_date=<?lsmb report.to_date 
-       ?>&accno=<?lsmb line.account_number ?>"
+<tr><th><a href="journal.pl?action=search&amp;to_date=<?lsmb report.to_date 
+       ?>&amp;accno=<?lsmb line.account_number ?>"
        ><?lsmb line.account_number _ ' - ' _ line.account_desc ?></a></th>
     <td class="amount"><?lsmb line.balance ?> </td>
     <?lsmb FOREACH c IN comparisons ?>
@@ -29,12 +53,12 @@
     <td class="amount"><?lsmb c.totals.A ?></td>
     <?lsmb END; ?>
 </tr>
-<tr class="section-head">
+<tr class="sectionhead">
    <th colspan="2"><?lsmb text('Liabilities') ?></th>
 </tr>
 <?lsmb FOREACH line IN report.balance_sheet.L.lines ?> 
-<tr><th><a href="journal.pl?action=search&to_date=<?lsmb report.to_date 
-       ?>&accno=<?lsmb line.account_number ?>"
+<tr><th><a href="journal.pl?action=search&amp;to_date=<?lsmb report.to_date 
+       ?>&amp;accno=<?lsmb line.account_number ?>"
        ><?lsmb line.account_number _ ' - ' _ line.account_desc ?></a></th>
     <td class="amount"><?lsmb line.balance ?> </td>
     <?lsmb FOREACH c IN comparisons ?>
@@ -48,12 +72,12 @@
     <td class="amount"><?lsmb c.totals.L ?></td>
     <?lsmb END ?>
 </tr>
-<tr class="section-head">
+<tr class="sectionhead">
    <th colspan="2"><?lsmb text('Equity') ?></th>
 </tr>
 <?lsmb FOREACH line IN report.balance_sheet.Q.lines ?> 
-<tr><th><a href="journal.pl?action=search&to_date=<?lsmb report.to_date 
-       ?>&accno=<?lsmb account_number ?>"
+<tr><th><a href="journal.pl?action=search&amp;to_date=<?lsmb report.to_date 
+       ?>&amp;accno=<?lsmb account_number ?>"
        ><?lsmb IF line.account_number; line.account_number _ ' - '; END; line.account_desc ?></a></th>
     <td class="amount"><?lsmb line.balance ?> </td>
     <?lsmb FOREACH c IN comparisons ?>
@@ -87,6 +111,12 @@
 <tr><th><?lsmb text('Equity to Liabilities') ?></th>
     <td><?lsmb report.balance_sheet.ratios.QL ?></td>
 </tr>
+<?lsmb IF FORMATS.grep('PDF').size() ?>
+<tr><td><a href="<?lsmb LINK ?>&amp;format=PDF">[<?lsmb text('PDF') ?>]</a></td>
+<td><a href="<?lsmb LINK ?>&amp;format=CSV">[<?lsmb text('CSV') ?>]</a></td>
+</tr>
+<?lsmb END ?>
 </table>
+</div>
 </body>
 </html>

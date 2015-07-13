@@ -70,17 +70,17 @@ sub start_report {
         }
     }
     @{$request->{entity_classes}} = $request->call_procedure(
-                      procname => 'entity__list_classes'
+                      funcname => 'entity__list_classes'
     );
     @{$request->{heading_list}} =  $request->call_procedure(
-                      procname => 'account_heading_list');
+                      funcname => 'account_heading_list');
     @{$request->{account_list}} =  $request->call_procedure(
-                      procname => 'account__list_by_heading');
+                      funcname => 'account__list_by_heading');
     @{$request->{batch_classes}} = $request->call_procedure(
-                      procname => 'batch_list_classes'
+                      funcname => 'batch_list_classes'
     );
     @{$request->{all_years}} = $request->call_procedure(
-              procname => 'date_get_all_years'
+              funcname => 'date_get_all_years'
     );
     my $curr = LedgerSMB::Setting->get('curr');
     @{$request->{currencies}} = split ':', $curr;
@@ -91,10 +91,10 @@ sub start_report {
         die $request->{_locale}->text('No report specified');
     }
     @{$request->{country_list}} = $request->call_procedure( 
-                   procname => 'location_list_country'
+                   funcname => 'location_list_country'
     );
     @{$request->{employees}} =  $request->call_procedure(
-        procname => 'employee__all_salespeople'
+        funcname => 'employee__all_salespeople'
     );
     my $template = LedgerSMB::Template->new(
         user => $request->{_user},
@@ -103,7 +103,8 @@ sub start_report {
         template => $request->{report_name},
         format => 'HTML'
     );
-    $template->render($request);
+    $template->render($request); # request not used for script;
+                                 # forms submit to other URLs than back to here
 }   
 
 =item list_business_types 
@@ -125,7 +126,8 @@ List the gifi entries.  No inputs expected or used.
 =cut
 
 sub list_gifi {
-    LedgerSMB::Report::Listings::GIFI->new()->render();
+    my ($request) = @_;
+    LedgerSMB::Report::Listings::GIFI->new(%$request)->render($request);
 }
 
 =item list_warehouse
@@ -135,7 +137,7 @@ List the warehouse entries.  No inputs expected or used.
 =cut
 
 sub list_warehouse {
-    LedgerSMB::Report::Listings::Warehouse->new()->render();
+    LedgerSMB::Report::Listings::Warehouse->new(%{$_[0]})->render($_[0]);
 }
 
 =item list_language
@@ -145,7 +147,8 @@ List language entries.  No inputs expected or used.
 =cut
 
 sub list_language {
-    LedgerSMB::Report::Listings::Language->new()->render();
+    my ($request) = @_;
+    LedgerSMB::Report::Listings::Language->new(%$request)->render($request);
 }
 
 =item list_sic
@@ -155,7 +158,8 @@ Lists sic codes
 =cut
 
 sub list_sic {
-    LedgerSMB::Report::Listings::SIC->new->render;
+    my ($request) = @_;
+    LedgerSMB::Report::Listings::SIC->new(%$request)->render($request);
 }
     
 =item balance_sheet 
@@ -194,13 +198,19 @@ sub search_overpayments {
     LedgerSMB::Report::Listings::Overpayments->new(%$request)->render($request);
 }
 
+=item reverse_overpayment
+
+Reverses overpayments selected from the search overpayments screen.
+
+=cut
+
 sub reverse_overpayment {
     my ($request) = @_;
     for my $rc (1 .. $request->{rowcount_}){
         next unless $request->{"select_$rc"};
         my $args = {id => $request->{"select_$rc"}};
         $args->{$_} = $request->{$_} for qw(post_date batch_id account_class
-                                            exchangerate, currency);
+                                            exchangerate currency);
         $args->{curr} = $args->{currency};
         LedgerSMB::DBObject::Payment->overpayment_reverse($args);
     }

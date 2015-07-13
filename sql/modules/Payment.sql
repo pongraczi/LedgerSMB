@@ -37,10 +37,13 @@ to account for its behavior in future versions.$$;
 -- ### To be dropped in 1.4: it's imprecise
 -- to return a set of entity accounts based on their names,
 -- if we're going to use them for discount calculations...
+DROP FUNCTION IF EXISTS payment_get_entity_accounts (int, text, text);
 CREATE OR REPLACE FUNCTION payment_get_entity_accounts
 (in_account_class int,
  in_vc_name text,
- in_vc_idn  text)
+ in_vc_idn  text,
+ in_datefrom date,
+ in_dateto date)
  returns SETOF payment_vc_info AS
  $$
  DECLARE out_entity payment_vc_info;
@@ -48,8 +51,8 @@ CREATE OR REPLACE FUNCTION payment_get_entity_accounts
 
  BEGIN
  	FOR out_entity IN
-              SELECT ec.id, e.name || 
-                     coalesce(':' || ec.description,'') as name, 
+              SELECT ec.id, coalesce(ec.pay_to_name, e.name || 
+                     coalesce(':' || ec.description,'')) as name, 
                      e.entity_class, ec.discount_account_id, ec.meta_number
  		FROM entity_credit_account ec
  		JOIN entity e ON (ec.entity_id = e.id)
@@ -57,6 +60,10 @@ CREATE OR REPLACE FUNCTION payment_get_entity_accounts
 		AND (e.name ilike coalesce('%'||in_vc_name||'%','%%') 
                     OR EXISTS (select 1 FROM company 
                                 WHERE entity_id = e.id AND tax_id = in_vc_idn))
+                AND (coalesce(ec.enddate, now()::date)
+                     >= coalesce(in_datefrom, now()::date))
+                AND (coalesce(ec.startdate, now()::date)
+                     <= coalesce(in_dateto, now()::date))
 	LOOP
 		RETURN NEXT out_entity;
 	END LOOP;
@@ -66,7 +73,9 @@ CREATE OR REPLACE FUNCTION payment_get_entity_accounts
 COMMENT ON FUNCTION payment_get_entity_accounts
 (in_account_class int,
  in_vc_name text,
- in_vc_idn  text) IS
+ in_vc_idn  text,
+ in_datefrom date,
+ in_dateto date) IS
 $$ Returns a minimal set of information about customer or vendor accounts
 as needed for discount calculations and the like.$$;
 
@@ -74,8 +83,8 @@ CREATE OR REPLACE FUNCTION payment_get_entity_account_payment_info
 (in_entity_credit_id int)
 RETURNS payment_vc_info
 AS $$
- SELECT ec.id, cp.legal_name ||
-        coalesce(':' || ec.description,'') as name,
+ SELECT ec.id, coalesce(ec.pay_to_name, cp.legal_name ||
+        coalesce(':' || ec.description,'')) as name,
         e.entity_class, ec.discount_account_id, ec.meta_number
  FROM entity_credit_account ec
  JOIN entity e ON (ec.entity_id = e.id)
@@ -89,9 +98,11 @@ IS $$ Returns payment information on the entity credit account as
   required to for discount calculations and payment processing. $$;
 
 
+DROP FUNCTION IF EXISTS payment_get_open_accounts(int);
 -- payment_get_open_accounts and the option to get all accounts need to be
 -- refactored and redesigned.  -- CT
-CREATE OR REPLACE FUNCTION payment_get_open_accounts(in_account_class int)
+CREATE OR REPLACE FUNCTION payment_get_open_accounts
+(in_account_class int, in_datefrom date, in_dateto date)
 returns SETOF entity AS
 $$
 DECLARE out_entity entity%ROWTYPE;
@@ -101,6 +112,10 @@ BEGIN
                 FROM entity e
                 JOIN entity_credit_account ec ON (ec.entity_id = e.id)
                         WHERE ec.entity_class = in_account_class
+                        AND (coalesce(ec.enddate, now()::date)
+                             <= coalesce(in_dateto, now()::date))
+                        AND (coalesce(ec.startdate, now()::date)
+                             >= coalesce(in_datefrom, now()::date))
                         AND CASE WHEN in_account_class = 1 THEN
                                 ec.id IN
                                 (SELECT entity_credit_account
@@ -127,7 +142,7 @@ BEGIN
 END;
 $$ LANGUAGE PLPGSQL;
 
-COMMENT ON FUNCTION payment_get_open_accounts(int) IS
+COMMENT ON FUNCTION payment_get_open_accounts(int, date, date) IS
 $$ This function takes a single argument (1 for vendor, 2 for customer as 
 always) and returns all entities with open accounts of the appropriate type. $$;
 
@@ -436,7 +451,7 @@ BEGIN
                              in_meta_number = c.meta_number)
                 GROUP BY c.id, e.name, c.meta_number, c.threshold, 
                         e.control_code, c.description
-                  HAVING  (sum(p.due) >= c.threshold
+                  HAVING  c.threshold is null or (sum(p.due) >= c.threshold
                         OR sum(case when a.batch_id = in_batch_id then 1
                                   else 0 END) > 0)
         ORDER BY c.meta_number ASC
@@ -1055,7 +1070,8 @@ DROP FUNCTION IF EXISTS payment__search(text, date, date, int, text, int, char(3
 
 CREATE OR REPLACE FUNCTION payment__search 
 (in_source text, in_from_date date, in_to_date date, in_credit_id int, 
-	in_cash_accno text, in_entity_class int, in_currency char(3))
+	in_cash_accno text, in_entity_class int, in_currency char(3), 
+        in_meta_number text)
 RETURNS SETOF payment_record AS
 $$
 DECLARE 
@@ -1064,7 +1080,7 @@ BEGIN
 	FOR out_row IN 
 		select sum(CASE WHEN c.entity_class = 1 then a.amount
 				ELSE a.amount * -1 END), c.meta_number, 
-			c.id, co.legal_name,
+			c.id, e.name as legal_name,
 			compound_array(ARRAY[ARRAY[ch.id::text, ch.accno, 
 				ch.description]]), a.source, 
 			b.control_code, b.description, a.voucher_id, a.transdate
@@ -1077,7 +1093,7 @@ BEGIN
 			) arap ON (arap.entity_credit_account = c.id)
 		JOIN acc_trans a ON (arap.id = a.trans_id)
 		JOIN chart ch ON (ch.id = a.chart_id)
-		JOIN company co ON (c.entity_id = co.entity_id)
+		JOIN entity e ON (c.entity_id = e.id)
 		LEFT JOIN voucher v ON (v.id = a.voucher_id)
 		LEFT JOIN batch b ON (b.id = v.batch_id)
 		WHERE (ch.accno = in_cash_accno OR ch.id IN (select account_id 
@@ -1094,7 +1110,9 @@ BEGIN
 			AND (a.transdate <= in_to_date OR in_to_date IS NULL)
 			AND (source = in_source OR in_source IS NULL)
                         AND arap.approved AND a.approved
-		GROUP BY c.meta_number, c.id, co.legal_name, a.transdate, 
+                        AND (c.meta_number = in_meta_number 
+                                OR in_meta_number IS NULL)
+		GROUP BY c.meta_number, c.id, e.name, a.transdate, 
 			a.source, a.memo, b.id, b.control_code, b.description, 
                         voucher_id
 		ORDER BY a.transdate, c.meta_number, a.source
@@ -1106,7 +1124,7 @@ $$ language plpgsql;
 
 COMMENT ON FUNCTION payment__search
 (in_source text, in_date_from date, in_date_to date, in_credit_id int,
-        in_cash_accno text, in_entity_class int, char(3)) IS
+        in_cash_accno text, in_entity_class int, char(3), text) IS
 $$This searches for payments.  in_date_to and _date_from specify the acceptable
 date range.  All other matches are exact except that null matches all values.
 

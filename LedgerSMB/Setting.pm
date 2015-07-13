@@ -25,6 +25,10 @@ The following methods are passed through to stored procedures:
 
 =item set ($self->{key}, $self->{value})
 
+=item all_accounts()
+
+Returns a list of all accounts on the system.
+
 =item parse_increment ($self->{key})
 
 This function updates a default entry in the database, incrimenting the last 
@@ -46,7 +50,7 @@ your software.
 
 package LedgerSMB::Setting;
 use LedgerSMB::App_State;
-use base qw(LedgerSMB::DBObject);
+use base qw(LedgerSMB::PGOld);
 use strict;
 our $VERSION = '1.0.0';
 
@@ -55,8 +59,10 @@ sub get {
     my $self = shift;
     my ($key) = @_;
     $key = $self->{key} unless $key;
-    my ($hashref) = __PACKAGE__->call_procedure( procname => 'setting_get',
-                                               args => [$key]) ;
+    my ($hashref) = __PACKAGE__->call_procedure(
+                                             dbh => LedgerSMB::App_State::DBH(),
+                                        funcname => 'setting_get',
+                                            args => [$key]) ;
     $self->{value} = $hashref->{value} if ref $self !~ /hash/i;
     return $hashref->{value};
 }
@@ -73,7 +79,7 @@ sub increment {
 
     # Replaces Form::UpdateDefaults
 
-    my ($retval) = $self->call_procedure(procname => 'setting_increment',
+    my ($retval) = $self->call_procedure(funcname => 'setting_increment',
                                              args => [$key]) ;
     my $value = $retval->{setting_increment};
 
@@ -176,7 +182,7 @@ sub _increment_process{
 
 sub get_currencies {
     my $self = shift;
-    my @data = $self->exec_method(funcname => 'setting__get_currencies');
+    my @data = $self->call_dbmethod(funcname => 'setting__get_currencies');
     @{$self->{currencies}} = $self->_parse_array($data[0]->{setting__get_currencies});
     return @{$self->{currencies}};
 }
@@ -185,14 +191,26 @@ sub set {
     my ($self, $key, $value) = @_;
     $key ||= $self->{key};
     $value ||= $self->{value};
-    $self->call_procedure(procname => 'setting__set',
+    $self->call_procedure(funcname => 'setting__set',
                               args => [$key, $value]);
 }
 
 sub accounts_by_link {
     my ($self, $link) = @_;
-    my @results = $self->call_procedure(procname => 'account__get_by_link_desc',
+    my @results = $self->call_procedure(funcname => 'account__get_by_link_desc',
                               args => [$link]);
+    for my $ref (@results){
+        $ref->{text} = "$ref->{accno} -- $ref->{description}";
+    }
+    return \@results;
+}
+
+sub all_accounts {
+    my ($self) = @_;
+
+    my @results = $self->call_procedure(funcname => 'chart_list_all',
+                              args => []);
+
     for my $ref (@results){
         $ref->{text} = "$ref->{accno} -- $ref->{description}";
     }

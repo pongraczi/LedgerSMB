@@ -85,8 +85,14 @@ SELECT * FROM entity_credit_account
  WHERE entity_class = $2 AND meta_number = $1;
 $$ language sql;
 
-CREATE OR REPLACE FUNCTION eca__history
+DROP FUNCTION IF EXISTS eca__history
 (in_name text, in_meta_number text, in_contact_info text, in_address_line text,
+ in_city text, in_state text, in_zip text, in_salesperson text, in_notes text, 
+ in_country_id int, in_from_date date, in_to_date date, in_type char(1), 
+ in_start_from date, in_start_to date, in_entity_class int, 
+ in_inc_open bool, in_inc_closed bool);
+CREATE OR REPLACE FUNCTION eca__history
+(in_name_part text, in_meta_number text, in_contact_info text, in_address_line text,
  in_city text, in_state text, in_zip text, in_salesperson text, in_notes text, 
  in_country_id int, in_from_date date, in_to_date date, in_type char(1), 
  in_start_from date, in_start_to date, in_entity_class int, 
@@ -193,7 +199,7 @@ LEFT JOIN person ep ON (ep.entity_id = ee.id)
 $$ LANGUAGE SQL;
 
 COMMENT ON FUNCTION eca__history 
-(in_name text, in_meta_number text, in_contact_info text, in_address_line text,
+(in_name_part text, in_meta_number text, in_contact_info text, in_address_line text,
  in_city text, in_state text, in_zip text, in_salesperson text, in_notes text,
  in_country_id int, in_from_date date, in_to_date date, in_type char(1),
  in_start_from date, in_start_to date, in_entity_class int,
@@ -204,9 +210,14 @@ a customer over a specific date range.
 meta_number is an exact match, as are in_open and inc_closed.  All other fields
 allow for partial matches.  NULL matches all values.$$;
 
-
-CREATE OR REPLACE FUNCTION eca__history_summary
+DROP FUNCTION IF EXISTS eca__history_summary
 (in_name text, in_meta_number text, in_contact_info text, in_address_line text,
+ in_city text, in_state text, in_zip text, in_salesperson text, in_notes text, 
+ in_country_id int, in_from_date date, in_to_date date, in_type char(1), 
+ in_start_from date, in_start_to date, in_entity_class int, 
+ in_inc_open bool, in_inc_closed bool);
+CREATE OR REPLACE FUNCTION eca__history_summary
+(in_name_part text, in_meta_number text, in_contact_info text, in_address_line text,
  in_city text, in_state text, in_zip text, in_salesperson text, in_notes text, 
  in_country_id int, in_from_date date, in_to_date date, in_type char(1), 
  in_start_from date, in_start_to date, in_entity_class int, 
@@ -299,7 +310,8 @@ BEGIN
                        WHERE in_name_part IS NULL) c ON (e.id = c.entity_id)
 		LEFT JOIN entity_credit_account ec ON (ec.entity_id = e.id)
 		LEFT JOIN business b ON (ec.business_id = b.id)
-		WHERE coalesce(ec.entity_class,e.entity_class) = in_entity_class
+		WHERE (in_entity_class is null 
+                        OR coalesce(ec.entity_class,e.entity_class) = in_entity_class)
 			AND (c.entity_id IN 
                        (select entity_id 
                           FROM entity_credit_account leca
@@ -1003,8 +1015,12 @@ $$ LANGUAGE PLPGSQL;
 COMMENT ON FUNCTION entity__list_bank_account(in_entity_id int) IS
 $$ Lists all bank accounts for the entity.$$;
 
-CREATE OR REPLACE FUNCTION entity__save_bank_account
+DROP FUNCTION IF EXISTS entity__save_bank_account
 (in_entity_id int, in_credit_id int, in_bic text, in_iban text,
+in_bank_account_id int);
+
+CREATE OR REPLACE FUNCTION entity__save_bank_account
+(in_entity_id int, in_credit_id int, in_bic text, in_iban text, in_remark text,
 in_bank_account_id int)
 RETURNS int AS
 $$
@@ -1012,14 +1028,15 @@ DECLARE out_id int;
 BEGIN
         UPDATE entity_bank_account
            SET bic = coalesce(in_bic,''),
-               iban = in_iban
+               iban = in_iban,
+               remark = in_remark
          WHERE id = in_bank_account_id;
 
         IF FOUND THEN
                 out_id = in_bank_account_id;
         ELSE
-	  	INSERT INTO entity_bank_account(entity_id, bic, iban)
-		VALUES(in_entity_id, in_bic, in_iban);
+	  	INSERT INTO entity_bank_account(entity_id, bic, iban, remark)
+		VALUES(in_entity_id, in_bic, in_iban, in_remark);
 	        SELECT CURRVAL('entity_bank_account_id_seq') INTO out_id ;
 	END IF;
 
@@ -1033,7 +1050,7 @@ END;
 $$ LANGUAGE PLPGSQL;
 
 COMMENT ON  FUNCTION entity__save_bank_account
-(in_entity_id int, in_credit_id int, in_bic text, in_iban text,
+(in_entity_id int, in_credit_id int, in_bic text, in_iban text, in_remark text,
 in_bank_account_id int) IS
 $$ Saves bank account to the credit account.$$;
 

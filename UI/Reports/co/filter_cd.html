@@ -1,10 +1,8 @@
-<?lsmb INCLUDE 'ui-header.html' 
-       	include_script = ["UI/ajax/scriptaculous/lib/prototype.js","UI/ajax/scriptaculous/src/scriptaculous.js?load=builder,effects,dragdrop,controls","UI/ajax/helpers.js"]
-?>
+<?lsmb INCLUDE 'ui-header.html' ?>
 <?lsmb PROCESS 'elements.html' ?>
 <body class="<?lsmb dojo_theme ?>">
 
-<form method="get" action="<?lsmb script ?>">
+<form method="get" action="<?lsmb request.script ?>">
 <?lsmb PROCESS input element_data = {
     type = "hidden"
     name = "sort"

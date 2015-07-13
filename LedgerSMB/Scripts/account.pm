@@ -58,7 +58,7 @@ sub edit {
         $request->error('No Chart Type Provided');
     }
     $request->{chart_id} = $request->{id};
-    my $account = LedgerSMB::DBObject::Account->new(base => $request);
+    my $account = LedgerSMB::DBObject::Account->new({base => $request});
     my @accounts = $account->get();
     my $acc = shift @accounts;
     if (!$acc){  # This should never happen.  Any occurance of this is a bug.
@@ -77,7 +77,7 @@ Request variables
 id: (optional):  If set, overwrite existing account.
 accno: the text used to specify the account number
 description:  Text to describe the account
-category: A = asset, L = liability, Q = Equity, I = Income, E = expense
+category: see COMMENT ON COLUMN account.category
 gifi_accno:  The GIFI account entry control code
 heading: (Optional) The integer representing the heading.id desired 
 contra:  If true, the account balances on the opposite side.
@@ -88,11 +88,8 @@ link:  a list of strings representing text box identifier.
 
 sub save {
     my ($request) = @_;
-    my $account = LedgerSMB::DBObject::Account->new(base => $request);
+    my $account = LedgerSMB::DBObject::Account->new({base => $request});
     $account->{$account->{summary}}=$account->{summary};
-    if ($account->{charttype} eq 'A'){
-            delete $account->{heading};
-    }
     $account->save;
     edit($account); 
 }
@@ -114,6 +111,7 @@ sub _display_account_screen {
     my ($form) = @_;
     my $account = LedgerSMB::DBObject::Account->new({base => $form});
     @{$form->{all_headings}} = $account->list_headings();
+    @{$form->{all_gifi}} = $account->gifi_list();
     $form->{recon} = $account->is_recon();
     my $locale = $form->{_locale};
     my $buttons = [];
@@ -134,9 +132,11 @@ sub _display_account_screen {
 
     if ( $form->{id} ) {
         $button{'save'} =
-          { ndx => 3, key => 'S', value => $locale->text('Save') };
+          { ndx => 3, key => 'S', value => $locale->text('Save'),
+           id => 'action_save' };
         $button{'save_as_new'} =
-          { ndx => 7, key => 'N', value => $locale->text('Save as new') };
+          { ndx => 7, key => 'N', value => $locale->text('Save as new'),
+           id => 'action_save_as_new' };
 
         if ( $form->{orphaned} ) {
             $button{'delete'} =
@@ -178,7 +178,7 @@ Shows the yearend screen.  No expected inputs.
 
 sub yearend_info {
     my ($request) = @_;
-    my $eoy =  LedgerSMB::DBObject::EOY->new(base => $request);
+    my $eoy =  LedgerSMB::DBObject::EOY->new({base => $request});
     $eoy->list_earnings_accounts;
     $eoy->{closed_date} = $eoy->latest_closing;
     $eoy->{user} = $request->{_user};    
@@ -187,7 +187,8 @@ sub yearend_info {
         locale => $request->{_locale},
         template => 'accounts/yearend'
     );
-    $template->render($eoy);
+    $template->render({ request => $request,
+                        eoy => $eoy});
 }
 
 =item post_yearend
@@ -204,7 +205,7 @@ in_retention_acc_id: Account id to post retained earnings into
 
 sub post_yearend {
     my ($request) = @_;
-    my $eoy =  LedgerSMB::DBObject::EOY->new(base => $request);
+    my $eoy =  LedgerSMB::DBObject::EOY->new({base => $request});
     $eoy->close_books;
     my $template = LedgerSMB::Template->new_UI(
         user => $request->{_user},
@@ -223,7 +224,7 @@ This reopens books as of $request->{reopen_date}
 
 sub reopen_books {
     my ($request) = @_;
-    my $eoy =  LedgerSMB::DBObject::EOY->new(base => $request);
+    my $eoy =  LedgerSMB::DBObject::EOY->new({base => $request});
     $eoy->reopen_books;
     delete $request->{reopen_date};
     yearend_info($request);

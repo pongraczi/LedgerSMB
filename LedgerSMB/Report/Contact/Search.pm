@@ -27,6 +27,7 @@ referral.
 
 package LedgerSMB::Report::Contact::Search;
 use Moose;
+use LedgerSMB::MooseTypes;
 extends 'LedgerSMB::Report';
 
 =head1 PROPERTIES
@@ -49,21 +50,18 @@ sub columns {
 
     return [
        {col_id => 'name',
-            type => 'text',
+            type => 'href',
+       href_base => "contact.pl?action=get&entity_class=".$self->entity_class,
             name => LedgerSMB::Report::text('Name') },
 
        {col_id => 'entity_control_code',
             type => 'href',
-       href_base =>($self->entity_class == 3)
-                    ? "employee.pl?action=get"
-                    :"contact.pl?action=get&entity_class=".$self->entity_class,
+       href_base => "contact.pl?action=get&entity_class=".$self->entity_class,
             name => LedgerSMB::Report::text('Control Code') },
 
        {col_id => 'meta_number',
             type => 'href',
-       href_base => ($self->entity_class == 3) 
-                    ? "employee.pl?action=get"
-                    : "contact.pl?action=get&entity_class=".$self->entity_class,
+       href_base => "contact.pl?action=get&entity_class=".$self->entity_class,
             name => LedgerSMB::Report::text('Credit Account Number') },
 
        {col_id => 'credit_description',
@@ -111,7 +109,7 @@ The account/entity class of the contact.  Required and an exact match.
 
 =cut
 
-has entity_class => (is => 'ro', isa => 'Int', required => 1);
+has entity_class => (is => 'ro', isa => 'Int');
 
 =item name_part
 
@@ -261,8 +259,10 @@ Runs the report, populates rows.
 
 sub run_report {
     my ($self) = @_;
-    my @rows = $self->exec_method({funcname => 'contact__search'});
+    my @rows = $self->call_dbmethod(funcname => 'contact__search');
     for my $r(@rows){
+        $r->{name_href_suffix} = 
+               "&entity_id=$r->{entity_id}&meta_number=$r->{meta_number}";
         $r->{meta_number_href_suffix} = 
                "&entity_id=$r->{entity_id}&meta_number=$r->{meta_number}";
         $r->{entity_control_code_href_suffix} = $r->{meta_number_href_suffix};

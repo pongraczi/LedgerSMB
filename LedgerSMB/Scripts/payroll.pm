@@ -34,17 +34,17 @@ with different inputs.
 sub show_income_type {
     my ($request) = @_;
     @{$request->{countries}} = $request->call_procedure(
-       procname => 'location_list_country'
+       funcname => 'location_list_country'
     );
     @{$request->{pics}} = $request->call_procedure(
-       procname => 'payroll_pic__list', args => [$request->{country_id}]
+       funcname => 'payroll_pic__list', args => [$request->{country_id}]
     ) if $request->{country_id};
 
     my $template = LedgerSMB::Template->new(
         user     => $request->{_user},
         locale   => $request->{_locale},
         path     => 'UI/payroll',
-        template => 'income_type',
+        template => 'income',
         format   => 'HTML'
     );
     $template->render($request);
@@ -85,14 +85,14 @@ Displays the income type search screen
 sub search_income_type {
     my ($request) = @_;
     @{$request->{countries}} = $request->call_procedure(
-       procname => 'location_list_country'
+       funcname => 'location_list_country'
     );
 
     my $template = LedgerSMB::Template->new(
         user     => $request->{_user},
         locale   => $request->{_locale},
         path     => 'UI/payroll',
-        template => 'income_type',
+        template => 'income_search',
         format   => 'HTML'
     )->render($request);
 }

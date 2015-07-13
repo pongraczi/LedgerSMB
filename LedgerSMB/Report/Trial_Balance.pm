@@ -109,6 +109,14 @@ If set, only include these accounts
 
 has accounts => (is => 'rw', isa => 'Maybe[ArrayRef[Int]]');
 
+=item business_units
+
+A list of business account ids
+
+=cut
+
+has business_units => (is => 'ro', isa => 'ArrayRef[Int]', required => 0);
+
 =back
 
 =head1  REPORT CONSTANT FUNCTIONS
@@ -197,31 +205,6 @@ sub header_lines {
 
 =over
 
-=item get
-
-Retrieves the trial balance for review and possibly running it.
-
-=cut
-
-sub get {
-    my ($self, $id) = @_;
-    my ($ref) = __PACKAGE__->call_procedure(procname => 'trial_balance__get', 
-                                              args => [$id]);
-    return __PACKAGE__->new(%$ref);
-}
-
-=item save
-
-Saves the trial balance to be run again with the same parameters another time
-
-=cut
-
-sub save {
-    my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'trial_balance__save'});
-    $self->id(values %$ref);
-}
-
 =item run_report
 
 Runs the trial balance report.
@@ -231,7 +214,7 @@ Runs the trial balance report.
 sub run_report {
     my ($self) = @_;
     $self->manual_totals('1');
-    my @rawrows = $self->exec_method({funcname => 'trial_balance__generate'});
+    my @rawrows = $self->call_dbmethod(funcname => 'trial_balance__generate');
     my $total_debits;
     my $total_credits;
     my @rows = ();

@@ -13,9 +13,8 @@ funds, and projects.
 
 package LedgerSMB::Business_Unit_Class;
 use Moose;
-use LedgerSMB::DBObject_Moose;
-use LedgerSMB::DBObject::App_Module;
-with 'LedgerSMB::DBObject_Moose';
+use LedgerSMB::App_Module;
+with 'LedgerSMB::PGObject';
 
 =head1 PROPERTIES
 
@@ -58,7 +57,7 @@ this is indivated for CRM and other applications.
 =cut
 
 has 'modules' => (is => 'rw', 
-                 isa => 'ArrayRef[LedgerSMB::DBObject::App_Module]'
+                 isa => 'ArrayRef[LedgerSMB::App_Module]'
 );
 
 =item ordering 
@@ -84,14 +83,13 @@ returns the business unit class that corresponds to the id requested.
 
 sub get {
     my ($self, $id) = @_;
-    my @classes = $self->call_procedure(procname => 'business_unit_class__get', 
+    my @classes = $self->call_procedure(funcname => 'business_unit_class__get', 
                                             args => [$id]
     );
     my $ref = shift @classes;
-    my @modules = $self->call_procedure(procname => 'business_unit_class__get_modules',
+    my @modules = $self->call_procedure(funcname => 'business_unit_class__get_modules',
                                             args => [$id]
     );
-    $self->prepare_dbhash($ref);
     my $class = $self->new(shift @classes);
     $class->modules(\@modules);
 }
@@ -105,9 +103,8 @@ changed in the process.
 
 sub save {
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'business_unit_class__save'});
+    my ($ref) = $self->call_dbmethod(funcname => 'business_unit_class__save');
     $self->save_modules();
-    $self->prepare_dbhash($ref);
     $self = $self->new(%$ref);
     return $self;
 }   
@@ -126,7 +123,7 @@ sub save_modules {
     for my $mod (@{$self->modules}){
         push @$mod_ids, $mod->id;
     }
-    $self->call_procedure(procname => 'business_unit_class__save_modules',
+    $self->call_procedure(funcname => 'business_unit_class__save_modules',
                               args => [$self->id, $mod_ids]
     );
 }
@@ -140,17 +137,15 @@ Returns a list of all business unit classes.
 sub list {
     my ($self, $active, $mod_name) = @_;
     my @classes = $self->call_procedure(
-            procname => 'business_unit__list_classes',
+            funcname => 'business_unit__list_classes',
                 args => [$active, $mod_name]);
     for my $class (@classes){
-        $self->prepare_dbhash($class);
         $class = $self->new(%$class);
-        my @modules = $self->call_procedure(procname => 'business_unit_class__get_modules',
+        my @modules = $self->call_procedure(funcname => 'business_unit_class__get_modules',
                                                 args => [$class->id]
         );
         for my $m (@modules){
-            $self->prepare_dbhash($m);
-            $m = LedgerSMB::DBObject::App_Module->new($m);
+            $m = LedgerSMB::App_Module->new($m);
         }
         $class->modules(\@modules);
     }
@@ -165,7 +160,7 @@ Deletes a business unit class.  Such classes may not have business units attache
  
 sub delete {
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'business_unit_class__delete'});
+    my ($ref) = $self->call_dbmethod(funcname => 'business_unit_class__delete');
 }   
 
 =back

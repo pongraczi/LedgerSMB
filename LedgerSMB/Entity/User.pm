@@ -6,8 +6,9 @@ LedgerSMB::Entity::User - User management Logic for LedgerSMB
 
 package LedgerSMB::Entity::User;
 use Moose;
+use Try::Tiny;
 use LedgerSMB::App_State;
-with 'LedgerSMB::DBObject_Moose';
+with 'LedgerSMB::PGObject';
 
 =head1 SYNOPSYS
 
@@ -21,11 +22,19 @@ Creating a new user:
 
 Saving permissions:
   my $user = LedgerSMB::Entity::User->new(%$request);
-  $user->set_roles($request);
+  $user->save_roles($request);
 
 =head1 PROPERTIES
 
 =over
+
+=item id
+
+This is the integer id of the user
+
+=cut 
+
+has id => (is => 'ro', isa => 'Int');
 
 =item entity_id
 
@@ -86,11 +95,11 @@ Returns the user object for that entity id.
 sub get {
     my ($self, $entity_id) = @_;
     my ($ref) = __PACKAGE__->call_procedure(
-                 procname => 'admin__get_user', args => [$entity_id]
+                 funcname => 'admin__get_user', args => [$entity_id]
     );
     return unless $ref->{entity_id};
     my @roles = __PACKAGE__->call_procedure(
-                 procname => 'admin__get_roles_for_user', args => [$entity_id]
+                 funcname => 'admin__get_roles_for_user', args => [$entity_id]
     );
     $_ = $_->{admin__get_roles_for_user} for (@roles);
     $ref->{role_list} = \@roles;
@@ -106,7 +115,7 @@ Resets a user's password to a temporary password good for 24 hours.
 sub reset_password{
     my ($self, $password) = @_;
     $self->password($password);
-    my ($ref) = $self->exec_method({funcname => 'admin__save_user'});
+    my ($ref) = $self->call_dbmethod(funcname => 'admin__save_user');
     $self->clear_password();
 }
 
@@ -118,7 +127,7 @@ Creates the new user.
 
 sub create{
     my ($self) = @_;
-    my ($ref) = $self->exec_method({funcname => 'admin__save_user'});
+    my ($ref) = $self->call_dbmethod(funcname => 'admin__save_user');
     $self->clear_password();
 }
 
@@ -132,7 +141,7 @@ sub save_roles{
     my ($self, $role_list) = @_;
     $role_list = $self->role_list unless $role_list;
     for my $rol_name (@$role_list) {
-        $self->call_procedure(procname => 'admin__add_user_to_role',
+        $self->call_procedure(funcname => 'admin__add_user_to_role',
                                   args => [$self->{username}, $rol_name]);
     }
 }
@@ -145,7 +154,7 @@ Lists roles for database.
 
 sub list_roles{
     my ($self) = @_;
-    my @roles =  __PACKAGE__->call_procedure(procname => 'admin__get_roles');
+    my @roles =  __PACKAGE__->call_procedure(funcname => 'admin__get_roles');
     for my $role (@roles){
         $role->{description} = $role->{rolname};
         $role->{description} =~ s/.*__//;

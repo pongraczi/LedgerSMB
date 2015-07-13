@@ -1,4 +1,3 @@
-
 =head1 NAME
 
 LedgerSMB::Template - Template support module for LedgerSMB 
@@ -159,7 +158,7 @@ use LedgerSMB::Company_Config;
 use LedgerSMB::Locale;
 use LedgerSMB::App_State;
 use Log::Log4perl;
-use File::Copy;
+use File::Copy "cp";
 
 my $logger = Log::Log4perl->get_logger('LedgerSMB::Template');
 
@@ -383,10 +382,12 @@ sub output {
 
 	my $method = $self->{method} || $args{method} || $args{media};
         $method = '' if !defined $method;
+
 	if ('email' eq lc $method) {
 		$self->_email_output;
         } elsif (defined $args{OUT} and $args{printmode} eq '>'){ # To file
                 cp($self->{rendered}, $args{OUT}); 
+                return if "zip" eq lc($method);
 	} elsif ('print' eq lc $method) {
 		$self->_lpr_output;
 	} elsif (defined $self->{output} or lc $method eq 'screen') {

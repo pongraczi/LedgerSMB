@@ -73,13 +73,6 @@ sub print {
         for ( keys %$form ) { $old_form->{$_} = $form->{$_} }
     }
 
-    if ( $form->{formname} =~ /(check|receipt)/ ) {
-        if ( $form->{media} eq 'screen' ) {
-            $form->error( $locale->text('Select postscript or PDF!') )
-              if $form->{format} !~ /(postscript|pdf)/;
-        }
-    }
-
     if ( !$form->{invnumber} ) {
         $invfld = 'sinumber';
         $invfld = 'vinumber' if $form->{ARAP} eq 'AP';
@@ -92,36 +85,6 @@ sub print {
         }
     }
 
-    if ( $form->{formname} =~ /(check|receipt)/ ) {
-        if ( $form->{media} ne 'screen' ) {
-            for (qw(action header)) { delete $form->{$_} }
-            $form->{invtotal} = $form->{oldinvtotal};
-
-            foreach $key ( keys %$form ) {
-                $form->{$key} =~ s/&/%26/g;
-                $form->{previousform} .= qq|$key=$form->{$key}&|;
-            }
-            chop $form->{previousform};
-            $form->{previousform} = $form->escape( $form->{previousform}, 1 );
-        }
-
-        if ( $form->{paidaccounts} > 1 ) {
-            if ( $form->{"paid_$form->{paidaccounts}"} ) {
-                &update;
-                $form->finalize_request();
-            }
-            elsif ( $form->{paidaccounts} > 2 ) {
-
-                # select payment
-                &select_payment;
-                $form->finalize_request();
-            }
-        }
-        else {
-            $form->error( $locale->text('Nothing to print!') );
-        }
-
-    }
     if ( $filename = $queued{ $form->{formname} } ) {
         $form->{queued} =~ s/$form->{formname} $filename//;
         unlink "${LedgerSMB::Sysconfig::spool}/$filename";
@@ -245,18 +208,10 @@ sub print_transaction {
     $form->{invtotal} = $form->{subtotal} + $tax;
     $form->{total}    = $form->{invtotal} - $form->{paid};
 
-    use LedgerSMB::CP;
-    $c =
-      CP->new( ( $form->{language_code} )
-        ? $form->{language_code}
-        : $myconfig{countrycode} );
-    $c->init;
     ( $whole, $form->{decimal} ) = split /\./, $form->{invtotal};
 
     $form->{decimal} .= "00";
     $form->{decimal}        = substr( $form->{decimal}, 0, 2 );
-    $form->{text_decimal}   = $c->num2text( $form->{decimal} * 1 );
-    $form->{text_amount}    = $c->num2text($whole);
     $form->{integer_amount} = $form->format_amount( \%myconfig, $whole );
 
     for (qw(invtotal subtotal paid total)) {
@@ -328,7 +283,10 @@ sub print_transaction {
           $form->audittrail( "", \%myconfig, \%audittrail );
     }
 
-    if ( $form->{media} !~ /(queue|screen)/ ) {
+    if ( lc($form->{media}) eq 'zip'){
+        $form->{OUT}       = $form->{zipdir};
+        $form->{printmode} = '>';
+    } elsif ( $form->{media} !~ /(zip|screen)/ ) {
         $form->{OUT}       = ${LedgerSMB::Sysconfig::printer}{ $form->{media} };
         $form->{printmode} = '|-';
 
@@ -396,7 +354,7 @@ sub print_transaction {
                 }
             }
         }
-
+        return if 'zip' eq lc($form->{media});
         &{"$display_form"};
 
     }
@@ -493,26 +451,17 @@ sub payment_selected {
 sub print_options {
 
     if ( $form->{selectlanguage} ) {
-        $form->{"selectlanguage"} =
-          $form->unescape( $form->{"selectlanguage"} );
         $form->{"selectlanguage"} =~ s/ selected//;
         $form->{"selectlanguage"} =~
           s/(<option value="\Q$form->{language_code}\E")/$1 selected/;
-        $lang = qq|<select name=language_code>$form->{selectlanguage}</select>
-    <input type=hidden name=selectlanguage value="|
-          . $form->escape( $form->{selectlanguage}, 1 ) . qq|">|;
+        $lang = qq|<select data-dojo-type="dijit/form/Select" name=language_code>$form->{selectlanguage}</select>|;
     }
 
-    $form->{selectformname} = $form->unescape( $form->{selectformname} );
-    $form->{selectformname} =~ s/ selected//;
-    $form->{selectformname} =~
-      s/(<option value="\Q$form->{formname}\E")/$1 selected/;
-
-    $type = qq|<select name=formname>$form->{selectformname}</select>
+    $type = qq|<select data-dojo-type="dijit/form/Select" name=formname>$form->{selectformname}</select>
   <input type=hidden name=selectformname value="|
       . $form->escape( $form->{selectformname}, 1 ) . qq|">|;
 
-    $media = qq|<select name=media>
+    $media = qq|<select data-dojo-type="dijit/form/Select" name=media>
           <option value="screen">| . $locale->text('Screen');
 
     $form->{selectformat} = qq|<option value="html">html<option value="csv">csv\n|;
@@ -528,14 +477,10 @@ sub print_options {
         $form->{selectformat} .= qq|
             <option value="postscript">| . $locale->text('Postscript') . qq|
 	    <option value="pdf">| . $locale->text('PDF');
-        $media .= qq|<option value="queue">| . $locale->text('Queue');
     }
 
-    $format = qq|<select name=format>$form->{selectformat}</select>|;
+    $format = qq|<select data-dojo-type="dijit/form/Select" name=format>$form->{selectformat}</select>|;
     $format =~ s/(<option value="\Q$form->{format}\E")/$1 selected/;
-    $format .= qq|
-  <input type=hidden name=selectformat value="|
-      . $form->escape( $form->{selectformat}, 1 ) . qq|">|;
     $media .= qq|</select>|;
     $media =~ s/(<option value="\Q$form->{media}\E")/$1 selected/;
 

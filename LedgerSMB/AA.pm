@@ -31,7 +31,7 @@ use LedgerSMB::Sysconfig;
 use LedgerSMB::App_State;
 use Log::Log4perl;
 use LedgerSMB::File;
-use Math::BigFloat;
+use LedgerSMB::PGNumber;
 use LedgerSMB::Setting;
 
 my $logger = Log::Log4perl->get_logger("AA");
@@ -378,6 +378,38 @@ sub post_transaction {
     $form->{datepaid} = $form->{transdate} unless $form->{datepaid};
     my $datepaid = ($paid) ? qq|'$form->{datepaid}'| : undef;
 
+    if (defined $form->{approved}) {
+
+        $query = qq| UPDATE $table SET approved = ? WHERE id = ?|;
+        $dbh->prepare($query)->execute($form->{approved}, $form->{id}) ||
+            $form->dberror($query);
+        if (!$form->{approved} && $form->{batch_id}){
+           if ($form->{ARAP} eq 'AR'){
+               $batch_class = 'ar';
+           } else {
+               $batch_class = 'ap';
+           }
+           my $vqh = $dbh->prepare('SELECT * FROM batch__lock_for_update(?)');
+           $vqh->execute($form->{batch_id});
+           my $bref = $vqh->fetchrow_hashref('NAME_lc');
+           # Change the below to die with localization in 1.4
+           $form->error('Approved Batch') if $bref->{approved_by};
+           $form->error('Locked Batch') if $bref->{locked_by};
+           $query = qq| 
+		INSERT INTO voucher (batch_id, trans_id, batch_class)
+		VALUES (?, ?, (select id from batch_class where class = ?))|;
+           $dbh->prepare($query)->execute($form->{batch_id}, $form->{id}, 
+                $batch_class) || $form->dberror($query);
+        }
+        
+    }
+    if ($table eq 'ar' and $form->{setting_sequence}){
+       my $seqsth = $dbh->prepare(
+            'UPDATE ar SET setting_sequence = ? WHERE id = ?'
+       );
+       $seqsth->execute($form->{setting_sequence}, $form->{id});
+       $seqsth->finish;
+    }
 
     $query = qq|
 		UPDATE $table 
@@ -399,6 +431,8 @@ sub post_transaction {
                         reverse = ?
 		WHERE id = ?
 	|;
+
+    $form->{invnumber} = undef if $form->{invnumber} eq '';
     
     my @queryargs = (
         $form->{invnumber},     $form->{description},    
@@ -412,34 +446,6 @@ sub post_transaction {
 	$form->{reverse},        $form->{id}
     );
     $dbh->prepare($query)->execute(@queryargs) || $form->dberror($query);
-    if (defined $form->{approved}) {
-
-        $query = qq| UPDATE $table SET approved = ? WHERE id = ?|;
-        $dbh->prepare($query)->execute($form->{approved}, $form->{id}) ||
-            $form->dberror($query);
-        if (!$form->{approved} && $form->{batch_id}){
-           if ($form->{ARAP} eq 'AR'){
-               $batch_class = 'ar';
-           } else {
-               $batch_class = 'ap';
-           }
-           my $vqh = $dbh->prepare(
-              'SELECT * FROM batch 
-               WHERE id = ? FOR UPDATE'
-           );
-           $vqh->execute($form->{batch_id});
-           my $bref = $vqh->fetchrow_hashref('NAME_lc');
-           # Change the below to die with localization in 1.4
-           $form->error('Approved Batch') if $bref->{approved_by};
-           $form->error('Locked Batch') if $bref->{locked_by};
-           $query = qq| 
-		INSERT INTO voucher (batch_id, trans_id, batch_class)
-		VALUES (?, ?, (select id from batch_class where class = ?))|;
-           $dbh->prepare($query)->execute($form->{batch_id}, $form->{id}, 
-                $batch_class) || $form->dberror($query);
-        }
-        
-    }
     @queries = $form->run_custom_queries( $table, 'INSERT' );
 
     # update exchangerate
@@ -829,6 +835,10 @@ sub get_name {
         $dateformat = 'yyyymmdd';
     }
 
+    if ( $form->{transdate} =~ m/\d\d\d\d-\d\d-\d\d/ ) {
+        $dateformat = 'yyyy-mm-dd';
+    }
+
     my $duedate;
 
     $dateformat = $dbh->quote($dateformat);
@@ -852,8 +862,11 @@ sub get_name {
 		          b.description AS business, 
 			  entity.control_code AS entity_control_code,
                           co.tax_id AS tax_id,
-			  c.meta_number, ecl.*, ctf.default_reportable,
-                          c.cash_account_id, ca.accno as cash_accno
+			  c.meta_number, ctf.default_reportable,
+                          c.cash_account_id, ca.accno as cash_accno,
+                          c.id as eca_id,
+                          coalesce(ecl.address, el.address) as address,
+                          coalesce(ecl.city, el.city) as city
 		     FROM entity_credit_account c
 		     JOIN entity ON (entity.id = c.entity_id)
                 LEFT JOIN account ca ON c.cash_account_id = ca.id
@@ -867,8 +880,14 @@ sub get_name {
                           JOIN location l ON etl.location_id = l.id
                           WHERE etl.location_class = 1) ecl
                         ON (c.id = ecl.credit_id)
+                LEFT JOIN (SELECT coalesce(line_one, '')
+                               || ' ' || coalesce(line_two, '') as address,
+                               l.city, etl.entity_id
+                          FROM entity_to_location etl
+                          JOIN location l ON etl.location_id = l.id
+                          WHERE etl.location_class = 1) el
+                        ON (c.entity_id = el.entity_id)
 		    WHERE c.id = ?/;
-    # TODO:  Add location join
 
     @queryargs = ( $form->{"$form->{vc}_id"} );
     my $sth = $dbh->prepare($query);
@@ -886,7 +905,41 @@ sub get_name {
     for ( keys %$ref ) { $form->{$_} = $ref->{$_} }
     $sth->finish;
 
-    # TODO:  Retrieve contact records
+    # get customer e-mail accounts
+    $query = qq|SELECT * FROM eca__list_contacts(?)
+                      WHERE class_id BETWEEN 12 AND ?
+                      ORDER BY class_id DESC;|;
+    my %id_map = ( 12 => 'email',
+    	       13 => 'cc',
+    	       14 => 'bcc',
+    	       15 => 'email',
+    	       16 => 'cc',
+    	       17 => 'bcc' );
+    $sth = $dbh->prepare($query);
+    $sth->execute( $form->{eca_id}, 17) || $form->dberror( $query );
+    
+    my $ctype;
+    my $billing_email = 0;
+
+    # Set these variables to empty, otherwise in some cases it keeps earlier values and cause doubled
+    # values, ie. when emailing invoice
+    $form->{email} = '';
+    $form->{cc} = '';
+    $form->{bcc} = '';
+
+    while ( $ref = $sth->fetchrow_hashref('NAME_lc') ) {
+        $ctype = $ref->{class_id};
+        $ctype = $id_map{$ctype};
+        $billing_email = 1
+    	if $ref->{class_id} == 15;
+
+        # If there's an explicit billing email, don't use
+        # the standard email addresses; otherwise fall back to standard
+        $form->{$ctype} .= ($form->{$ctype} ? ", " : "") . $ref->{contact}
+    	if (($ref->{class_id} < 15 && ! $billing_email)
+    	    || $ref->{class_id} >= 15);
+    }
+    $sth->finish;
 
     my $buysell = ( $form->{vc} eq 'customer' ) ? "buy" : "sell";
 
@@ -933,6 +986,7 @@ sub get_name {
                 SELECT sum(o.amount * coalesce(e.$buysell, 1)) as used
                   FROM oe o
              LEFT JOIN exchangerate e ON o.transdate = e.transdate
+                                      AND o.curr = e.curr
                  WHERE not closed and oe_class_id in (1, 2)
                        and entity_credit_account = ?) s|;
 
@@ -940,35 +994,8 @@ sub get_name {
         $sth->execute( $form->{"$form->{vc}_id"}, $form->{"$form->{vc}_id"})
            || $form->dberror($query);
         my ($credit_rem) = $sth->fetchrow_array;
-        ( $form->{creditremaining} ) -= Math::BigFloat->new($credit_rem);
+        ( $form->{creditremaining} ) -= LedgerSMB::PGNumber->new($credit_rem);
 
-        $sth->finish;
-    }
-
-    # get shipto if we did not converted an order or invoice
-    if ( !$form->{shipto} ) {
-
-        for (
-            qw(shiptoname shiptoaddress1 shiptoaddress2
-            shiptocity shiptostate shiptozipcode
-            shiptocountry shiptocontact shiptophone
-            shiptofax shiptoemail)
-          )
-        {
-            delete $form->{$_};
-        }
-
-        ## needs fixing (SELECT *)
-        $query = qq|
-			SELECT * 
-			  FROM new_shipto
-			 WHERE trans_id = $form->{"$form->{vc}_id"}|;
-
-        $sth = $dbh->prepare($query);
-        $sth->execute || $form->dberror($query);
-
-        $ref = $sth->fetchrow_hashref(NAME_lc);
-        for ( keys %$ref ) { $form->{$_} = $ref->{$_} }
         $sth->finish;
     }
 

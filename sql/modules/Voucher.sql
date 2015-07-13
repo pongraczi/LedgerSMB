@@ -1,5 +1,19 @@
 BEGIN;
 
+CREATE OR REPLACE FUNCTION batch__lock_for_update (in_batch_id integer)
+RETURNS batch LANGUAGE SQL 
+SECURITY DEFINER AS
+$$
+SELECT * FROM batch WHERE id = $1 FOR UPDATE;
+$$;
+
+REVOKE EXECUTE ON FUNCTION batch__lock_for_update(int) FROM PUBLIC;
+
+COMMENT ON FUNCTION batch__lock_for_update(in_batch_id integer) is
+$$ Locks a batch for the duration of the running transaction.
+To be used when adding vouchers to the batch to prevent others
+from hitting the batch for other purposes (e.g. approval) $$;
+
 CREATE OR REPLACE FUNCTION voucher_get_batch (in_batch_id integer) 
 RETURNS batch AS 
 $$
@@ -24,7 +38,8 @@ CREATE TYPE voucher_list AS (
 	transaction_id integer,
 	amount numeric,
 	transaction_date date,
-        batch_class text
+        batch_class text,
+        batch_class_id int
 );
 
 -- voucher_list could use refactoring
@@ -37,7 +52,7 @@ BEGIN
     	FOR voucher_item IN
 		SELECT v.id, a.invoice, a.invnumber, e.name, 
 			v.batch_id, v.trans_id, 
-			a.amount, a.transdate, 'Payable'
+			a.amount, a.transdate, 'Payable', v.batch_class
 		FROM voucher v
 		JOIN ap a ON (v.trans_id = a.id)
 		JOIN entity_credit_account eca 
@@ -49,7 +64,7 @@ BEGIN
 		UNION
 		SELECT v.id, a.invoice, a.invnumber, e.name, 
 			v.batch_id, v.trans_id, 
-			a.amount, a.transdate, 'Receivable'
+			a.amount, a.transdate, 'Receivable', v.batch_class
 		FROM voucher v
 		JOIN ar a ON (v.trans_id = a.id)
 		JOIN entity_credit_account eca 
@@ -68,7 +83,7 @@ BEGIN
 			CASE WHEN bc.class = 'payment' THEN 'Payment'
 			     WHEN bc.class = 'payment_reversal' 
 			     THEN 'Payment Reversal'
-			END
+			END, v.batch_class
 		FROM voucher v
 		JOIN acc_trans a ON (v.id = a.voucher_id)
                 JOIN batch_class bc ON (bc.id = v.batch_class)
@@ -91,7 +106,7 @@ BEGIN
 			CASE WHEN bc.class = 'receipt' THEN 'Receipt'
 			     WHEN bc.class = 'receipt_reversal' 
 			     THEN 'Receipt Reversal'
-			END
+			END, v.batch_class
 		FROM voucher v
 		JOIN acc_trans a ON (v.id = a.voucher_id)
                 JOIN batch_class bc ON (bc.id = v.batch_class)
@@ -108,7 +123,7 @@ BEGIN
 		UNION ALL
 		SELECT v.id, false, g.reference, g.description, 
 			v.batch_id, v.trans_id,
-			sum(a.amount), g.transdate, 'GL'
+			sum(a.amount), g.transdate, 'GL', v.batch_class
 		FROM voucher v
 		JOIN gl g ON (g.id = v.trans_id)
 		JOIN acc_trans a ON (v.trans_id = a.trans_id)
